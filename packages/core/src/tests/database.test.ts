@@ -15,6 +15,18 @@ class MockDatabaseAdapter extends DatabaseAdapter {
     getMemoryById(_id: UUID): Promise<Memory | null> {
         throw new Error("Method not implemented.");
     }
+    async getMemoriesByIds(
+        memoryIds: UUID[],
+        _tableName?: string
+    ): Promise<Memory[]> {
+        return memoryIds.map((id) => ({
+            id: id,
+            content: { text: "Test Memory" },
+            roomId: "room-id" as UUID,
+            userId: "user-id" as UUID,
+            agentId: "agent-id" as UUID,
+        })) as Memory[];
+    }
     log(_params: {
         body: { [key: string]: unknown };
         userId: UUID;

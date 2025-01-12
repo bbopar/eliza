@@ -224,6 +224,35 @@ export class SqlJsDatabaseAdapter
         return memory || null;
     }
 
+    async getMemoriesByIds(
+        memoryIds: UUID[],
+        tableName?: string
+    ): Promise<Memory[]> {
+        if (memoryIds.length === 0) return [];
+        const placeholders = memoryIds.map(() => "?").join(",");
+        let sql = `SELECT * FROM memories WHERE id IN (${placeholders})`;
+        const queryParams: any[] = [...memoryIds];
+
+        if (tableName) {
+            sql += ` AND type = ?`;
+            queryParams.push(tableName);
+        }
+
+        const stmt = this.db.prepare(sql);
+        stmt.bind(queryParams);
+
+        const memories: Memory[] = [];
+        while (stmt.step()) {
+            const memory = stmt.getAsObject() as unknown as Memory;
+            memories.push({
+                ...memory,
+                content: JSON.parse(memory.content as unknown as string),
+            });
+        }
+        stmt.free();
+        return memories;
+    }
+
     async createMemory(memory: Memory, tableName: string): Promise<void> {
         let isUnique = true;
         if (memory.embedding) {

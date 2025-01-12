@@ -200,7 +200,7 @@ export class PostgresDatabaseAdapter
                 await client.query("SET app.use_openai_embedding = 'false'");
                 await client.query("SET app.use_ollama_embedding = 'true'");
                 await client.query("SET app.use_gaianet_embedding = 'false'");
-            } else if (embeddingConfig.provider === EmbeddingProvider.GaiaNet){
+            } else if (embeddingConfig.provider === EmbeddingProvider.GaiaNet) {
                 await client.query("SET app.use_openai_embedding = 'false'");
                 await client.query("SET app.use_ollama_embedding = 'false'");
                 await client.query("SET app.use_gaianet_embedding = 'true'");
@@ -468,6 +468,33 @@ export class PostgresDatabaseAdapter
                         : rows[0].content,
             };
         }, "getMemoryById");
+    }
+
+    async getMemoriesByIds(
+        memoryIds: UUID[],
+        tableName?: string
+    ): Promise<Memory[]> {
+        return this.withDatabase(async () => {
+            if (memoryIds.length === 0) return [];
+            const placeholders = memoryIds.map((_, i) => `$${i + 1}`).join(",");
+            let sql = `SELECT * FROM memories WHERE id IN (${placeholders})`;
+            const queryParams: any[] = [...memoryIds];
+
+            if (tableName) {
+                sql += ` AND type = $${memoryIds.length + 1}`;
+                queryParams.push(tableName);
+            }
+
+            const { rows } = await this.pool.query(sql, queryParams);
+
+            return rows.map((row) => ({
+                ...row,
+                content:
+                    typeof row.content === "string"
+                        ? JSON.parse(row.content)
+                        : row.content,
+            }));
+        }, "getMemoriesByIds");
     }
 
     async createMemory(memory: Memory, tableName: string): Promise<void> {

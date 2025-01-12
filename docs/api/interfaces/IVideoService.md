@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / IVideoService
+[@elizaos/core v0.1.7](../index.md) / IVideoService
 
 # Interface: IVideoService
 
@@ -24,7 +24,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1036](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1036)
+[packages/core/src/types.ts:1092](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1092)
 
 ## Methods
 
@@ -48,7 +48,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1041](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1041)
+[packages/core/src/types.ts:1097](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1097)
 
 ***
 
@@ -66,7 +66,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1149](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1149)
+[packages/core/src/types.ts:1206](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1206)
 
 ***
 
@@ -84,7 +84,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1150](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1150)
+[packages/core/src/types.ts:1207](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1207)
 
 ***
 
@@ -102,7 +102,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1151](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1151)
+[packages/core/src/types.ts:1208](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1208)
 
 ***
 
@@ -122,4 +122,4 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1152](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1152)
+[packages/core/src/types.ts:1209](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1209)

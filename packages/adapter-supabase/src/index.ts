@@ -362,6 +362,31 @@ export class SupabaseDatabaseAdapter extends DatabaseAdapter {
         return data as Memory;
     }
 
+    async getMemoriesByIds(
+        memoryIds: UUID[],
+        tableName?: string
+    ): Promise<Memory[]> {
+        if (memoryIds.length === 0) return [];
+
+        let query = this.supabase
+            .from("memories")
+            .select("*")
+            .in("id", memoryIds);
+
+        if (tableName) {
+            query = query.eq("type", tableName);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error("Error retrieving memories by IDs:", error);
+            return [];
+        }
+
+        return data as Memory[];
+    }
+
     async createMemory(
         memory: Memory,
         tableName: string,

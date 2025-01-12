@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / IDatabaseCacheAdapter
+[@elizaos/core v0.1.7](../index.md) / IDatabaseCacheAdapter
 
 # Interface: IDatabaseCacheAdapter
 
@@ -22,7 +22,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:952](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L952)
+[packages/core/src/types.ts:1008](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1008)
 
 ***
 
@@ -46,7 +46,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:957](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L957)
+[packages/core/src/types.ts:1013](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1013)
 
 ***
 
@@ -68,4 +68,4 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:963](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L963)
+[packages/core/src/types.ts:1019](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1019)

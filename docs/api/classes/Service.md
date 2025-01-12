@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / Service
+[@elizaos/core v0.1.7](../index.md) / Service
 
 # Class: `abstract` Service
 
@@ -38,7 +38,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1025](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1025)
+[packages/core/src/types.ts:1081](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1081)
 
 ***
 
@@ -54,7 +54,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1036](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1036)
+[packages/core/src/types.ts:1092](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1092)
 
 ## Methods
 
@@ -72,7 +72,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1029](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1029)
+[packages/core/src/types.ts:1085](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1085)
 
 ***
 
@@ -92,4 +92,4 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1041](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1041)
+[packages/core/src/types.ts:1097](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1097)

@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / IAgentRuntime
+[@elizaos/core v0.1.7](../index.md) / IAgentRuntime
 
 # Interface: IAgentRuntime
 
@@ -12,7 +12,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1046](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1046)
+[packages/core/src/types.ts:1102](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1102)
 
 ***
 
@@ -22,7 +22,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1047](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1047)
+[packages/core/src/types.ts:1103](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1103)
 
 ***
 
@@ -32,7 +32,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1048](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1048)
+[packages/core/src/types.ts:1104](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1104)
 
 ***
 
@@ -42,7 +42,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1049](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1049)
+[packages/core/src/types.ts:1105](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1105)
 
 ***
 
@@ -52,7 +52,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1050](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1050)
+[packages/core/src/types.ts:1106](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1106)
 
 ***
 
@@ -62,7 +62,17 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1051](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1051)
+[packages/core/src/types.ts:1107](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1107)
+
+***
+
+### imageVisionModelProvider
+
+> **imageVisionModelProvider**: [`ModelProviderName`](../enumerations/ModelProviderName.md)
+
+#### Defined in
+
+[packages/core/src/types.ts:1108](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1108)
 
 ***
 
@@ -72,7 +82,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1052](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1052)
+[packages/core/src/types.ts:1109](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1109)
 
 ***
 
@@ -82,7 +92,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1053](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1053)
+[packages/core/src/types.ts:1110](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1110)
 
 ***
 
@@ -92,7 +102,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1054](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1054)
+[packages/core/src/types.ts:1111](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1111)
 
 ***
 
@@ -102,7 +112,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1055](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1055)
+[packages/core/src/types.ts:1112](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1112)
 
 ***
 
@@ -112,13 +122,13 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1056](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1056)
+[packages/core/src/types.ts:1113](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1113)
 
 ***
 
 ### fetch()?
 
-> `optional` **fetch**: (`input`, `init`?) => `Promise`\<`Response`\>
+> `optional` **fetch**: (`input`, `init`?) => `Promise`\<`Response`\>(`input`, `init`?) => `Promise`\<`Response`\>
 
 [MDN Reference](https://developer.mozilla.org/docs/Web/API/fetch)
 
@@ -132,9 +142,19 @@ Properties
 
 `Promise`\<`Response`\>
 
+#### Parameters
+
+• **input**: `string` \| `Request` \| `URL`
+
+• **init?**: `RequestInit`
+
+#### Returns
+
+`Promise`\<`Response`\>
+
 #### Defined in
 
-[packages/core/src/types.ts:1058](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1058)
+[packages/core/src/types.ts:1115](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1115)
 
 ***
 
@@ -144,7 +164,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1060](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1060)
+[packages/core/src/types.ts:1117](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1117)
 
 ***
 
@@ -154,7 +174,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1061](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1061)
+[packages/core/src/types.ts:1118](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1118)
 
 ***
 
@@ -164,7 +184,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1062](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1062)
+[packages/core/src/types.ts:1119](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1119)
 
 ***
 
@@ -174,7 +194,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1063](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1063)
+[packages/core/src/types.ts:1120](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1120)
 
 ***
 
@@ -184,7 +204,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1064](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1064)
+[packages/core/src/types.ts:1121](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1121)
 
 ***
 
@@ -194,7 +214,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1066](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1066)
+[packages/core/src/types.ts:1123](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1123)
 
 ***
 
@@ -204,7 +224,7 @@ Properties
 
 #### Defined in
 
-[packages/core/src/types.ts:1068](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1068)
+[packages/core/src/types.ts:1125](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1125)
 
 ***
 
@@ -217,7 +237,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1071](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1071)
+[packages/core/src/types.ts:1128](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1128)
 
 ## Methods
 
@@ -231,7 +251,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1073](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1073)
+[packages/core/src/types.ts:1130](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1130)
 
 ***
 
@@ -249,7 +269,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1075](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1075)
+[packages/core/src/types.ts:1132](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1132)
 
 ***
 
@@ -267,7 +287,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1077](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1077)
+[packages/core/src/types.ts:1134](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1134)
 
 ***
 
@@ -289,7 +309,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1079](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1079)
+[packages/core/src/types.ts:1136](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1136)
 
 ***
 
@@ -307,7 +327,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1081](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1081)
+[packages/core/src/types.ts:1138](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1138)
 
 ***
 
@@ -325,7 +345,7 @@ but I think the real solution is forthcoming as a base client interface
 
 #### Defined in
 
-[packages/core/src/types.ts:1083](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1083)
+[packages/core/src/types.ts:1140](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1140)
 
 ***
 
@@ -341,7 +361,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1086](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1086)
+[packages/core/src/types.ts:1143](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1143)
 
 ***
 
@@ -365,7 +385,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1088](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1088)
+[packages/core/src/types.ts:1145](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1145)
 
 ***
 
@@ -389,7 +409,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1095](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1095)
+[packages/core/src/types.ts:1152](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1152)
 
 ***
 
@@ -409,7 +429,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1102](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1102)
+[packages/core/src/types.ts:1159](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1159)
 
 ***
 
@@ -433,7 +453,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1104](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1104)
+[packages/core/src/types.ts:1161](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1161)
 
 ***
 
@@ -451,7 +471,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1111](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1111)
+[packages/core/src/types.ts:1168](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1168)
 
 ***
 
@@ -477,7 +497,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1113](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1113)
+[packages/core/src/types.ts:1170](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1170)
 
 ***
 
@@ -497,7 +517,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1121](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1121)
+[packages/core/src/types.ts:1178](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1178)
 
 ***
 
@@ -515,7 +535,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1123](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1123)
+[packages/core/src/types.ts:1180](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1180)
 
 ***
 
@@ -535,7 +555,7 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1125](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1125)
+[packages/core/src/types.ts:1182](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1182)
 
 ***
 
@@ -553,4 +573,4 @@ Methods
 
 #### Defined in
 
-[packages/core/src/types.ts:1130](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1130)
+[packages/core/src/types.ts:1187](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1187)

@@ -99,6 +99,17 @@ export abstract class DatabaseAdapter<DB = any> implements IDatabaseAdapter {
     abstract getMemoryById(id: UUID): Promise<Memory | null>;
 
     /**
+     * Retrieves multiple memories by their IDs
+     * @param memoryIds Array of UUIDs of the memories to retrieve
+     * @param tableName Optional table name to filter memories by type
+     * @returns Promise resolving to array of Memory objects
+     */
+    abstract getMemoriesByIds(
+        memoryIds: UUID[],
+        tableName?: string
+    ): Promise<Memory[]>;
+
+    /**
      * Retrieves cached embeddings based on the specified query parameters.
      * @param params An object containing parameters for the embedding retrieval.
      * @returns A Promise that resolves to an array of objects containing embeddings and levenshtein scores.

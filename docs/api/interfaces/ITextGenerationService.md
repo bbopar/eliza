@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / ITextGenerationService
+[@elizaos/core v0.1.7](../index.md) / ITextGenerationService
 
 # Interface: ITextGenerationService
 
@@ -24,7 +24,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1036](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1036)
+[packages/core/src/types.ts:1092](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1092)
 
 ## Methods
 
@@ -48,7 +48,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1041](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1041)
+[packages/core/src/types.ts:1097](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1097)
 
 ***
 
@@ -62,7 +62,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1156](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1156)
+[packages/core/src/types.ts:1213](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1213)
 
 ***
 
@@ -90,7 +90,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1157](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1157)
+[packages/core/src/types.ts:1214](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1214)
 
 ***
 
@@ -118,7 +118,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1165](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1165)
+[packages/core/src/types.ts:1222](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1222)
 
 ***
 
@@ -136,4 +136,4 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1173](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1173)
+[packages/core/src/types.ts:1230](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1230)

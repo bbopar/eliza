@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / ITranscriptionService
+[@elizaos/core v0.1.7](../index.md) / ITranscriptionService
 
 # Interface: ITranscriptionService
 
@@ -24,7 +24,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1036](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1036)
+[packages/core/src/types.ts:1092](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1092)
 
 ## Methods
 
@@ -48,7 +48,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1041](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1041)
+[packages/core/src/types.ts:1097](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1097)
 
 ***
 
@@ -66,7 +66,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1140](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1140)
+[packages/core/src/types.ts:1197](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1197)
 
 ***
 
@@ -84,7 +84,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1141](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1141)
+[packages/core/src/types.ts:1198](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1198)
 
 ***
 
@@ -102,7 +102,7 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1144](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1144)
+[packages/core/src/types.ts:1201](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1201)
 
 ***
 
@@ -120,4 +120,4 @@ Add abstract initialize method that must be implemented by derived classes
 
 #### Defined in
 
-[packages/core/src/types.ts:1145](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1145)
+[packages/core/src/types.ts:1202](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1202)

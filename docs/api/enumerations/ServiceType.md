@@ -1,4 +1,4 @@
-[@elizaos/core v0.1.7-alpha.1](../index.md) / ServiceType
+[@elizaos/core v0.1.7](../index.md) / ServiceType
 
 # Enumeration: ServiceType
 
@@ -10,7 +10,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1226](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1226)
+[packages/core/src/types.ts:1288](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1288)
 
 ***
 
@@ -20,7 +20,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1227](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1227)
+[packages/core/src/types.ts:1289](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1289)
 
 ***
 
@@ -30,7 +30,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1228](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1228)
+[packages/core/src/types.ts:1290](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1290)
 
 ***
 
@@ -40,7 +40,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1229](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1229)
+[packages/core/src/types.ts:1291](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1291)
 
 ***
 
@@ -50,7 +50,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1230](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1230)
+[packages/core/src/types.ts:1292](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1292)
 
 ***
 
@@ -60,7 +60,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1231](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1231)
+[packages/core/src/types.ts:1293](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1293)
 
 ***
 
@@ -70,7 +70,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1232](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1232)
+[packages/core/src/types.ts:1294](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1294)
 
 ***
 
@@ -80,7 +80,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1233](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1233)
+[packages/core/src/types.ts:1295](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1295)
 
 ***
 
@@ -90,7 +90,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1234](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1234)
+[packages/core/src/types.ts:1296](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1296)
 
 ***
 
@@ -100,7 +100,7 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1235](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1235)
+[packages/core/src/types.ts:1297](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1297)
 
 ***
 
@@ -110,4 +110,4 @@
 
 #### Defined in
 
-[packages/core/src/types.ts:1236](https://github.com/elizaOS/eliza/blob/main/packages/core/src/types.ts#L1236)
+[packages/core/src/types.ts:1298](https://github.com/bbopar/eliza/blob/main/packages/core/src/types.ts#L1298)
