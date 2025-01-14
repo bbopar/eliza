@@ -243,18 +243,20 @@ export function createApiRouter(
 
             for (const agentRuntime of agents.values()) {
                 const teeLogService = agentRuntime
-                    .getService<TeeLogService>(
-                    ServiceType.TEE_LOG
-                )
-                .getInstance();
+                    .getService<TeeLogService>(ServiceType.TEE_LOG)
+                    .getInstance();
 
                 const agents = await teeLogService.getAllAgents();
-                allAgents.push(...agents)
+                allAgents.push(...agents);
             }
 
             const runtime: AgentRuntime = agents.values().next().value;
-            const teeLogService = runtime.getService<TeeLogService>(ServiceType.TEE_LOG).getInstance();
-            const attestation = await teeLogService.generateAttestation(JSON.stringify(allAgents));
+            const teeLogService = runtime
+                .getService<TeeLogService>(ServiceType.TEE_LOG)
+                .getInstance();
+            const attestation = await teeLogService.generateAttestation(
+                JSON.stringify(allAgents)
+            );
             res.json({ agents: allAgents, attestation: attestation });
         } catch (error) {
             elizaLogger.error("Failed to get TEE agents:", error);
@@ -274,13 +276,13 @@ export function createApiRouter(
             }
 
             const teeLogService = agentRuntime
-                .getService<TeeLogService>(
-                ServiceType.TEE_LOG
-            )
-            .getInstance();
+                .getService<TeeLogService>(ServiceType.TEE_LOG)
+                .getInstance();
 
             const teeAgent = await teeLogService.getAgent(agentId);
-            const attestation = await teeLogService.generateAttestation(JSON.stringify(teeAgent));
+            const attestation = await teeLogService.generateAttestation(
+                JSON.stringify(teeAgent)
+            );
             res.json({ agent: teeAgent, attestation: attestation });
         } catch (error) {
             elizaLogger.error("Failed to get TEE agent:", error);
@@ -309,12 +311,16 @@ export function createApiRouter(
                 };
                 const agentRuntime: AgentRuntime = agents.values().next().value;
                 const teeLogService = agentRuntime
-                    .getService<TeeLogService>(
-                        ServiceType.TEE_LOG
-                    )
+                    .getService<TeeLogService>(ServiceType.TEE_LOG)
                     .getInstance();
-                const pageQuery = await teeLogService.getLogs(teeLogQuery, page, pageSize);
-                const attestation = await teeLogService.generateAttestation(JSON.stringify(pageQuery));
+                const pageQuery = await teeLogService.getLogs(
+                    teeLogQuery,
+                    page,
+                    pageSize
+                );
+                const attestation = await teeLogService.generateAttestation(
+                    JSON.stringify(pageQuery)
+                );
                 res.json({
                     logs: pageQuery,
                     attestation: attestation,
@@ -327,6 +333,66 @@ export function createApiRouter(
             }
         }
     );
+
+    router.post("/agents/:agentId/memories/batch", async (req, res) => {
+        const agentId = req.params.agentId;
+        const { memoryIds, tableName } = req.body;
+        let runtime = agents.get(agentId);
+
+        if (!runtime) {
+            runtime = Array.from(agents.values()).find(
+                (a) => a.character.name.toLowerCase() === agentId.toLowerCase()
+            );
+        }
+
+        if (!runtime) {
+            res.status(404).send("Agent not found");
+            return;
+        }
+
+        try {
+            const memories = await runtime.databaseAdapter.getMemoriesByIds(
+                memoryIds,
+                tableName
+            );
+            const response = {
+                agentId,
+                memories: memories.map((memory) => ({
+                    id: memory.id,
+                    userId: memory.userId,
+                    agentId: memory.agentId,
+                    createdAt: memory.createdAt,
+                    content: {
+                        text: memory.content.text,
+                        action: memory.content.action,
+                        source: memory.content.source,
+                        url: memory.content.url,
+                        inReplyTo: memory.content.inReplyTo,
+                        attachments: memory.content.attachments?.map(
+                            (attachment) => ({
+                                id: attachment.id,
+                                url: attachment.url,
+                                title: attachment.title,
+                                source: attachment.source,
+                                description: attachment.description,
+                                text: attachment.text,
+                                contentType: attachment.contentType,
+                            })
+                        ),
+                    },
+                    embedding: memory.embedding,
+                    roomId: memory.roomId,
+                    unique: memory.unique,
+                    similarity: memory.similarity,
+                })),
+            };
+
+            res.json(response);
+        } catch (error) {
+            console.error("Error fetching memories by ids:", error);
+            res.status(500).json({ error: "Failed to fetch memories by ids" });
+        }
+    });
 
     return router;
 }
