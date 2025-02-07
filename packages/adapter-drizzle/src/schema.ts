@@ -1,23 +1,48 @@
 import {
-    pgTable,
-    uuid,
-    timestamp,
-    text,
-    jsonb,
     boolean,
+    customType,
     integer,
+    jsonb,
+    pgTable,
+    text,
+    timestamp,
+    uuid,
     vector,
 } from "drizzle-orm/pg-core";
 import { getEmbeddingConfig } from "@elizaos/core";
+import { sql } from "drizzle-orm";
 
-const dimensions = getEmbeddingConfig().dimensions;
+const stringJsonb = customType<{ data: string; driverData: string }>({
+    dataType() {
+        return "jsonb";
+    },
+    toDriver(value: string): string {
+        return JSON.stringify(value);
+    },
+    fromDriver(value: string): string {
+        return JSON.stringify(value);
+    },
+});
+
+const numberTimestamp = customType<{ data: number; driverData: string }>({
+    dataType() {
+        return "timestamptz";
+    },
+    toDriver(value: number): string {
+        return new Date(value).toISOString();
+    },
+    fromDriver(value: string): number {
+        return new Date(value).getTime();
+    },
+});
+
+const DIMENSIONS = getEmbeddingConfig().dimensions;
 
 export const accountTable = pgTable("accounts", {
     id: uuid("id").primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     name: text("name"),
     username: text("username"),
     email: text("email").notNull(),
@@ -28,13 +53,12 @@ export const accountTable = pgTable("accounts", {
 export const memoryTable = pgTable("memories", {
     id: uuid("id").primaryKey().notNull(),
     type: text("type").notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     content: jsonb("content").default(""),
     embedding: vector("embedding", {
-        dimensions: dimensions,
+        dimensions: DIMENSIONS,
     }),
     userId: uuid("userId")
         .references(() => accountTable.id)
@@ -50,18 +74,16 @@ export const memoryTable = pgTable("memories", {
 
 export const roomTable = pgTable("rooms", {
     id: uuid("id").primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
 });
 
 export const goalTable = pgTable("goals", {
     id: uuid("id").primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     userId: uuid("userId")
         .references(() => accountTable.id)
         .references(() => accountTable.id),
@@ -76,10 +98,9 @@ export const goalTable = pgTable("goals", {
 
 export const logTable = pgTable("logs", {
     id: uuid("id").defaultRandom().primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     userId: uuid("userId")
         .notNull()
         .references(() => accountTable.id)
@@ -94,10 +115,9 @@ export const logTable = pgTable("logs", {
 
 export const participantTable = pgTable("participants", {
     id: uuid("id").primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     userId: uuid("userId")
         .references(() => accountTable.id)
         .references(() => accountTable.id),
@@ -110,10 +130,9 @@ export const participantTable = pgTable("participants", {
 
 export const relationshipTable = pgTable("relationships", {
     id: uuid("id").primaryKey().notNull(),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     userA: uuid("userA")
         .notNull()
         .references(() => accountTable.id)
@@ -134,12 +153,11 @@ export const knowledgeTable = pgTable("knowledge", {
     agentId: uuid("agentId").references(() => accountTable.id),
     content: jsonb("content").default(""),
     embedding: vector("embedding", {
-        dimensions: dimensions,
+        dimensions: DIMENSIONS,
     }),
-    createdAt: timestamp("createdAt", {
-        withTimezone: true,
-        mode: "string",
-    }).notNull().defaultNow(),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
     isMain: boolean("isMain").default(false),
     originalId: uuid("originalId"),
     chunkIndex: integer("chunkIndex"),
@@ -149,7 +167,9 @@ export const knowledgeTable = pgTable("knowledge", {
 export const cacheTable = pgTable("cache", {
     key: text("key").notNull(),
     agentId: text("agentId").notNull(),
-    value: jsonb("value").default(""),
-    createdAt: timestamp("createdAt", { mode: "string" }).defaultNow(),
-    expiresAt: timestamp("expiresAt", { mode: "string" }),
+    value: stringJsonb("value").default(""),
+    createdAt: numberTimestamp("createdAt")
+        .default(sql`now()`)
+        .notNull(),
+    expiresAt: numberTimestamp("expiresAt"),
 });

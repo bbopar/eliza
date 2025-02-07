@@ -40,7 +40,8 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { v4 as uuid } from "uuid";
 import { runMigrations } from "./migrations";
-import { Pool } from "pg";
+import pkg from "pg";
+const { Pool } = pkg;
 
 export class DrizzleDatabaseAdapter
     extends DatabaseAdapter<NodePgDatabase>
@@ -51,7 +52,7 @@ export class DrizzleDatabaseAdapter
 
     constructor(
         databaseUrl: string,
-        // TODO: drizzle has it's own circuit breaker config.
+        // TODO: drizzle has it's own circuit breaker config...
         circuitBreakerConfig?: {
             failureThreshold?: number;
             resetTimeout?: number;
@@ -72,13 +73,19 @@ export class DrizzleDatabaseAdapter
         try {
             await this.setEmbeddingProviderSettings();
 
-            const exists: boolean = await this.checkTable();
+            const { rows } = await this.db.execute(sql`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'rooms'
+                );
+            `);
 
-            if (!exists || !(await this.validateVectorSetup())) {
+            if (!rows[0].exists || !(await this.validateVectorSetup())) {
                 const pool = new Pool({
                     connectionString: this.databaseUrl,
                 });
                 await runMigrations(pool);
+                await pool.end();
             }
         } catch (error) {
             elizaLogger.error("Failed to initialize database:", error);
@@ -87,59 +94,47 @@ export class DrizzleDatabaseAdapter
     }
 
     private setDatabaseName(): string {
-        return (
-            this.databaseUrl.match(/\/([^\/\?]+)(?:\?|$)/)?.[1] || "postgres"
-        );
+        const DATABASE_NAME_PATTERN = /\/([^\/\?]+)(?:\?|$)/;
+        const matches = this.databaseUrl.match(DATABASE_NAME_PATTERN);
+        return matches?.[1] || "postgres";
     }
 
-    private async setEmbeddingProviderSettings() {
+    private async setEmbeddingProviderSettings(): Promise<void> {
         const embeddingConfig = getEmbeddingConfig();
-        const isOpenAI = embeddingConfig.provider === EmbeddingProvider.OpenAI;
-        const isOllama = embeddingConfig.provider === EmbeddingProvider.Ollama;
-        const isGaiaNet = embeddingConfig.provider === EmbeddingProvider.GaiaNet;
-    
-        // First set for future sessions with ALTER DATABASE
-        const alterQueries = [
-            `ALTER DATABASE ${this.databaseName} SET app.use_openai_embedding = '${isOpenAI}'`,
-            `ALTER DATABASE ${this.databaseName} SET app.use_ollama_embedding = '${isOllama}'`,
-            `ALTER DATABASE ${this.databaseName} SET app.use_gaianet_embedding = '${isGaiaNet}'`,
-        ];
-    
-        // Then set for current session with SET
-        const setQueries = [
-            `SET app.use_openai_embedding = '${isOpenAI}'`,
-            `SET app.use_ollama_embedding = '${isOllama}'`,
-            `SET app.use_gaianet_embedding = '${isGaiaNet}'`,
-        ];
-    
-        // Execute all queries
-        const allQueries = [...setQueries, ...alterQueries];
-        for (const query of allQueries) {
-            await this.db.transaction(async (tx) => {
-                await tx.execute(sql.raw(query));
-            });
-        }
-    }
+        const providers = ["openai", "ollama", "gaianet"] as const;
 
-    private getTimestamp(date: Date | string): number {
-        return date instanceof Date ? date.getTime() : new Date(date).getTime();
-    }
-
-    private timestampToIsoString(timestamp: number): string {
-        return new Date(timestamp).toISOString();
-    }
-
-    // TODO: improve this function.
-    private async checkTable(): Promise<boolean> {
         try {
-            const result = await this.db.execute<{
-                to_regclass: string | null;
-            }>(sql`
-                SELECT to_regclass('public.rooms') as to_regclass
-            `);
-            return Boolean(result[0]?.to_regclass);
+            await this.db.transaction(async (tx) => {
+                for (const provider of providers) {
+                    const query = sql.raw(
+                        `ALTER DATABASE "${this.databaseName}" SET app.use_${provider}_embedding = 'false'`
+                    );
+                    await tx.execute(query);
+                }
+
+                if (
+                    Object.values(EmbeddingProvider).includes(
+                        embeddingConfig.provider
+                    )
+                ) {
+                    const providerName = embeddingConfig.provider.toLowerCase();
+                    const query = sql.raw(
+                        `ALTER DATABASE "${this.databaseName}" SET app.use_${providerName}_embedding = 'true'`
+                    );
+                    await tx.execute(query);
+                }
+            });
         } catch (error) {
-            return false;
+            if (
+                error instanceof Error &&
+                error.message.includes("tuple concurrently updated")
+            ) {
+                elizaLogger.info(
+                    "Database settings already updated by another connection"
+                );
+                return;
+            }
+            throw error;
         }
     }
 
@@ -215,7 +210,7 @@ export class DrizzleDatabaseAdapter
                 username: account.username ?? null,
                 email: account.email ?? "",
                 avatarUrl: account.avatarUrl ?? null,
-                details: account.details ?? {},
+                details: sql`${account.details}::jsonb` || {},
             });
 
             elizaLogger.debug("Account created successfully:", {
@@ -251,21 +246,11 @@ export class DrizzleDatabaseAdapter
             ];
 
             if (params.start) {
-                conditions.push(
-                    gte(
-                        memoryTable.createdAt,
-                        new Date(params.start).toISOString()
-                    )
-                );
+                conditions.push(gte(memoryTable.createdAt, params.start));
             }
 
             if (params.end) {
-                conditions.push(
-                    lte(
-                        memoryTable.createdAt,
-                        new Date(params.end).toISOString()
-                    )
-                );
+                conditions.push(lte(memoryTable.createdAt, params.end));
             }
 
             if (params.unique) {
@@ -286,29 +271,10 @@ export class DrizzleDatabaseAdapter
                 ? await query.limit(params.count)
                 : await query;
 
-            elizaLogger.debug("Fetching memories:", {
-                roomId: params.roomId,
-                tableName: params.tableName,
-                unique: params.unique,
-                agentId: params.agentId,
-                timeRange:
-                    params.start || params.end
-                        ? {
-                              start: params.start
-                                  ? new Date(params.start).toISOString()
-                                  : undefined,
-                              end: params.end
-                                  ? new Date(params.end).toISOString()
-                                  : undefined,
-                          }
-                        : undefined,
-                limit: params.count,
-            });
-
             return rows.map((row) => ({
                 id: row.id as UUID,
                 type: row.type,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 content:
                     typeof row.content === "string"
                         ? JSON.parse(row.content)
@@ -358,7 +324,7 @@ export class DrizzleDatabaseAdapter
 
             return rows.map((row) => ({
                 id: row.id as UUID,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 content:
                     typeof row.content === "string"
                         ? JSON.parse(row.content)
@@ -392,7 +358,7 @@ export class DrizzleDatabaseAdapter
             const row = result[0];
             return {
                 id: row.id as UUID,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 content:
                     typeof row.content === "string"
                         ? JSON.parse(row.content)
@@ -430,7 +396,7 @@ export class DrizzleDatabaseAdapter
 
             return rows.map((row) => ({
                 id: row.id as UUID,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 content:
                     typeof row.content === "string"
                         ? JSON.parse(row.content)
@@ -468,18 +434,18 @@ export class DrizzleDatabaseAdapter
                     SELECT 
                         embedding,
                         COALESCE(
-                            content::jsonb->>'text',
+                            content->>${params.query_field_sub_name},
                             ''
                         ) as content_text
                     FROM memories 
                     WHERE type = ${params.query_table_name}
+                    AND content->>${params.query_field_sub_name} IS NOT NULL
                 )
                 SELECT 
                     embedding,
                     levenshtein(${params.query_input}, content_text) as levenshtein_score
                 FROM content_text
-                WHERE content_text IS NOT NULL
-                AND levenshtein(${params.query_input}, content_text) <= ${params.query_threshold}
+                WHERE levenshtein(${params.query_input}, content_text) <= ${params.query_threshold}
                 ORDER BY levenshtein_score
                 LIMIT ${params.query_match_count}
             `);
@@ -495,7 +461,18 @@ export class DrizzleDatabaseAdapter
                 }))
                 .filter((row) => Array.isArray(row.embedding));
         } catch (error) {
-            elizaLogger.error("Error in getCachedEmbeddings:", error);
+            elizaLogger.error("Error in getCachedEmbeddings:", {
+                error: error instanceof Error ? error.message : String(error),
+                tableName: params.query_table_name,
+                fieldName: params.query_field_name,
+            });
+            if (
+                error instanceof Error &&
+                error.message ===
+                    "levenshtein argument exceeds maximum length of 255 characters"
+            ) {
+                return [];
+            }
             throw error;
         }
     }
@@ -507,18 +484,8 @@ export class DrizzleDatabaseAdapter
         type: string;
     }): Promise<void> {
         try {
-            const logId = uuid();
-
-            elizaLogger.debug("Creating log entry:", {
-                logId,
-                type: params.type,
-                roomId: params.roomId,
-                userId: params.userId,
-                bodyKeys: Object.keys(params.body),
-            });
-
             await this.db.insert(logTable).values({
-                body: params.body,
+                body: sql`${params.body}::jsonb`,
                 userId: params.userId,
                 roomId: params.roomId,
                 type: params.type,
@@ -672,12 +639,9 @@ export class DrizzleDatabaseAdapter
         }
     ): Promise<Memory[]> {
         try {
-            // Ensure vector is properly formatted
-            const cleanVector = embedding.map((n) => {
-                if (!Number.isFinite(n)) return 0;
-                // Limit precision to avoid floating point issues
-                return Number(n.toFixed(6));
-            });
+            const cleanVector = embedding.map((n) =>
+                Number.isFinite(n) ? Number(n.toFixed(6)) : 0
+            );
 
             const similarity = sql<number>`1 - (${cosineDistance(
                 memoryTable.embedding,
@@ -721,7 +685,7 @@ export class DrizzleDatabaseAdapter
             return results.map((row) => ({
                 id: row.id as UUID,
                 type: row.type,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 content:
                     typeof row.content === "string"
                         ? JSON.parse(row.content)
@@ -772,7 +736,6 @@ export class DrizzleDatabaseAdapter
                 isUnique = similarMemories.length === 0;
             }
 
-            // Ensure content is properly structured before insertion
             const contentToInsert =
                 typeof memory.content === "string"
                     ? JSON.parse(memory.content)
@@ -788,6 +751,7 @@ export class DrizzleDatabaseAdapter
                     roomId: memory.roomId,
                     agentId: memory.agentId,
                     unique: memory.unique ?? isUnique,
+                    createdAt: memory.createdAt,
                 },
             ]);
         } catch (error) {
@@ -923,7 +887,7 @@ export class DrizzleDatabaseAdapter
                 status: (row.status ?? "NOT_STARTED") as GoalStatus,
                 description: row.description ?? "",
                 objectives: row.objectives as any[],
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
             }));
         } catch (error) {
             elizaLogger.error("Failed to get goals:", {
@@ -964,7 +928,7 @@ export class DrizzleDatabaseAdapter
                 userId: goal.userId,
                 name: goal.name,
                 status: goal.status,
-                objectives: goal.objectives,
+                objectives: sql`${goal.objectives}::jsonb`,
             });
         } catch (error) {
             elizaLogger.error("Failed to create goal:", {
@@ -1238,7 +1202,6 @@ export class DrizzleDatabaseAdapter
             return true;
         } catch (error) {
             if ((error as { code?: string }).code === "23505") {
-                // Unique violation
                 elizaLogger.warn("Relationship already exists:", {
                     userA: params.userA,
                     userB: params.userB,
@@ -1364,7 +1327,7 @@ export class DrizzleDatabaseAdapter
                 embedding: row.embedding
                     ? new Float32Array(row.embedding)
                     : undefined,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
             }));
         } catch (error) {
             elizaLogger.error("Failed to get knowledge:", {
@@ -1450,7 +1413,7 @@ export class DrizzleDatabaseAdapter
                 embedding: row.embedding
                     ? new Float32Array(row.embedding)
                     : undefined,
-                createdAt: this.getTimestamp(row.createdAt),
+                createdAt: row.createdAt,
                 similarity: row.combined_score,
             }));
 
@@ -1476,7 +1439,6 @@ export class DrizzleDatabaseAdapter
             try {
                 const metadata = knowledge.content.metadata || {};
 
-                // If this is a chunk, use createKnowledgeChunk
                 if (metadata.isChunk && metadata.originalId) {
                     await this.createKnowledgeChunk({
                         id: knowledge.id,
@@ -1492,7 +1454,6 @@ export class DrizzleDatabaseAdapter
                         createdAt: knowledge.createdAt || Date.now(),
                     });
                 } else {
-                    // This is a main knowledge item
                     await tx.insert(knowledgeTable).values({
                         id: knowledge.id,
                         agentId: metadata.isShared ? null : knowledge.agentId,
@@ -1508,9 +1469,7 @@ export class DrizzleDatabaseAdapter
                         originalId: null,
                         chunkIndex: null,
                         isShared: metadata.isShared || false,
-                        createdAt: this.timestampToIsoString(
-                            knowledge.createdAt || Date.now()
-                        ),
+                        createdAt: knowledge.createdAt,
                     });
                 }
             } catch (error) {
@@ -1552,7 +1511,7 @@ export class DrizzleDatabaseAdapter
             originalId: params.originalId,
             chunkIndex: params.chunkIndex,
             isShared: params.isShared,
-            createdAt: this.timestampToIsoString(params.createdAt),
+            createdAt: params.createdAt,
         });
     }
 
@@ -1599,7 +1558,8 @@ export class DrizzleDatabaseAdapter
                         eq(cacheTable.key, params.key)
                     )
                 );
-            return result[0]?.value as string | undefined;
+
+            return result[0]?.value || undefined;
         } catch (error) {
             elizaLogger.error("Failed to get cache:", {
                 error: error instanceof Error ? error.message : String(error),
@@ -1621,7 +1581,7 @@ export class DrizzleDatabaseAdapter
                 .values({
                     key: params.key,
                     agentId: params.agentId,
-                    value: params.value,
+                    value: sql`${params.value}::jsonb`,
                 })
                 .onConflictDoUpdate({
                     target: [cacheTable.key, cacheTable.agentId],

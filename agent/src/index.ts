@@ -15,6 +15,7 @@ import { TwitterClientInterface } from "@elizaos/client-twitter";
 import { AlexaClientInterface } from "@elizaos/client-alexa";
 import { MongoDBDatabaseAdapter } from "@elizaos/adapter-mongodb";
 import { DevaClientInterface } from "@elizaos/client-deva";
+import { DrizzleDatabaseAdapter } from "@elizaos/adapter-drizzle";
 
 import { FarcasterClientInterface } from "@elizaos/client-farcaster";
 import { OmniflixPlugin } from "@elizaos/plugin-omniflix";
@@ -730,10 +731,26 @@ function initializeDatabase(dataDir: string) {
         return db;
     } else if (process.env.POSTGRES_URL) {
         elizaLogger.info("Initializing PostgreSQL connection...");
-        const db = new PostgresDatabaseAdapter({
-            connectionString: process.env.POSTGRES_URL,
-            parseInputs: true,
-        });
+        // const db = new PostgresDatabaseAdapter({
+        //     connectionString: process.env.POSTGRES_URL,
+        //     parseInputs: true,
+        // });
+
+        // // Test the connection
+        // db.init()
+        //     .then(() => {
+        //         elizaLogger.success(
+        //             "Successfully connected to PostgreSQL database"
+        //         );
+        //     })
+        //     .catch((error) => {
+        //         elizaLogger.error("Failed to connect to PostgreSQL:", error);
+        //     });
+
+        
+        // return db;
+
+        const db = new DrizzleDatabaseAdapter(process.env.POSTGRES_URL);
 
         // Test the connection
         db.init()
@@ -745,7 +762,7 @@ function initializeDatabase(dataDir: string) {
             .catch((error) => {
                 elizaLogger.error("Failed to connect to PostgreSQL:", error);
             });
-
+        
         return db;
     } else if (process.env.PGLITE_DATA_DIR) {
         elizaLogger.info("Initializing PgLite adapter...");

@@ -14,7 +14,7 @@ import pg from "pg";
 import { sql } from "drizzle-orm";
 import { getEmbeddingForTest } from "@elizaos/core";
 import { EMBEDDING_OPTIONS, MemorySeedManager } from "./seed.ts";
-import { connectDatabase, cleanDatabase, parseVectorString } from "./utils.ts";
+import { connectDatabase, cleanDatabase, parseVectorString, stopContainers } from "./utils.ts";
 
 vi.setConfig({ testTimeout: 15000 });
 
@@ -1204,6 +1204,81 @@ describe("Memory Operations with Vector", () => {
         expect(nonExistentResults).toHaveLength(0);
     });
 
+    test("should handle long text inputs in getCachedEmbeddings", async () => {
+        const testMemoryId = stringToUuid("cache-long-test");
+        // Create a long string similar to the one in logs that caused the error
+        const longContent =
+            "gaming meta speedrun strategies crypto trading technical analysis discord culture streaming tech gaming hardware esports blockchain technology defi protocols game economics community management meme culture gaming history market trends hardware optimization competitive strategies digital assets gaming psychology online communities";
+
+        await adapter.createMemory(
+            {
+                id: testMemoryId,
+                content: {
+                    text: longContent,
+                    type: "message",
+                },
+                userId: seedManager.USER_ID,
+                agentId: seedManager.AGENT_ID,
+                roomId: seedManager.ROOM_ID,
+                createdAt: Date.now(),
+            },
+            TEST_TABLE
+        );
+
+        const params = {
+            query_table_name: TEST_TABLE,
+            query_threshold: 2,
+            query_input: longContent, // This will trigger the error
+            query_field_name: "content",
+            query_field_sub_name: "text",
+            query_match_count: 10,
+        };
+
+        await expect(adapter.getCachedEmbeddings(params)).rejects.toThrow(
+            "levenshtein argument exceeds maximum length of 255 characters"
+        );
+    });
+});
+
+
+describe("Memory timestamp operations", () => {
+    const TEST_TABLE = "test_memories";
+    let adapter: DrizzleDatabaseAdapter;
+    let client: pg.Client;
+    let docker: Docker;
+    let agent_id: UUID = stringToUuid("agent-1");
+    let user_id: UUID = stringToUuid("user-1");
+    let room_id: UUID = stringToUuid("room-1");
+
+    beforeAll(async () => {
+        ({ adapter, client, docker } = await connectDatabase());
+        await adapter.init();
+
+        await adapter.createAccount({
+            id: agent_id,
+            name: "Agent Test",
+            username: "agent-test",
+            email: "agent-test@test.com",
+        });
+
+        await adapter.createAccount({
+            id: user_id,
+            name: "User Test",
+            username: "user-test",
+            email: "user-test@test.com",
+        });
+
+        await adapter.createRoom(room_id);
+        await adapter.addParticipant(agent_id, room_id);
+        await adapter.addParticipant(user_id, room_id);
+    });
+
+    afterAll(async () => {
+        await cleanDatabase(client);
+        await client?.end();
+        await stopContainers(client, docker);
+    });
+
     test("should handle timestamps correctly when creating and retrieving memory", async () => {
         const memoryId = stringToUuid("timestamp-test-1");
         const now = Date.now();
@@ -1217,9 +1292,9 @@ describe("Memory Operations with Vector", () => {
                     text: content,
                     type: "message",
                 },
-                userId: seedManager.USER_ID,
-                agentId: seedManager.AGENT_ID,
-                roomId: seedManager.ROOM_ID,
+                userId: user_id,
+                agentId: agent_id,
+                roomId: room_id,
                 createdAt: now,
                 unique: true,
             },
@@ -1233,11 +1308,10 @@ describe("Memory Operations with Vector", () => {
     });
 
     test("should retrieve memories within a specified time range", async () => {
-        // Create a new test room to isolate these memories
-        const testRoomId = stringToUuid("timestamp-range-room");
-        await adapter.createRoom(testRoomId);
-        await adapter.addParticipant(seedManager.AGENT_ID, testRoomId);
-        await adapter.addParticipant(seedManager.USER_ID, testRoomId);
+        const isolatedRoomId = stringToUuid("isolated-room");
+        await adapter.createRoom(isolatedRoomId);
+        await adapter.addParticipant(agent_id, isolatedRoomId);
+        await adapter.addParticipant(user_id, isolatedRoomId);
 
         const now = Date.now();
         const hourAgo = now - 3600000; // 1 hour ago
@@ -1247,19 +1321,19 @@ describe("Memory Operations with Vector", () => {
         const memory1 = {
             id: stringToUuid("timestamp-range-1"),
             content: { text: "Recent memory", type: "message" },
-            userId: seedManager.USER_ID,
-            agentId: seedManager.AGENT_ID,
-            roomId: testRoomId, // Use isolated test room
-            createdAt: now - 1000, // Just now
+            userId: user_id,
+            agentId: agent_id,
+            roomId: isolatedRoomId,
+            createdAt: now - 1000,
             unique: true,
         };
 
         const memory2 = {
             id: stringToUuid("timestamp-range-2"),
             content: { text: "Older memory", type: "message" },
-            userId: seedManager.USER_ID,
-            agentId: seedManager.AGENT_ID,
-            roomId: testRoomId, // Use isolated test room
+            userId: user_id,
+            agentId: agent_id,
+            roomId: isolatedRoomId,
             createdAt: twoHoursAgo,
             unique: true,
         };
@@ -1269,7 +1343,7 @@ describe("Memory Operations with Vector", () => {
 
         // Retrieve memories from last hour
         const recentMemories = await adapter.getMemories({
-            roomId: testRoomId,
+            roomId: isolatedRoomId,
             tableName: TEST_TABLE,
             start: hourAgo,
             end: now,
