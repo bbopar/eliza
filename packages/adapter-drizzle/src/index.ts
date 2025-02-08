@@ -237,7 +237,7 @@ export class DrizzleDatabaseAdapter
             await this.db.transaction(async (tx) => {
                 for (const provider of providers) {
                     const query = sql.raw(
-                        `ALTER DATABASE "${this.databaseName}" SET app.use_${provider}_embedding = 'false'`
+                        `SET app.use_${provider}_embedding = 'false'`
                     );
                     await tx.execute(query);
                 }
@@ -249,7 +249,7 @@ export class DrizzleDatabaseAdapter
                 ) {
                     const providerName = embeddingConfig.provider.toLowerCase();
                     const query = sql.raw(
-                        `ALTER DATABASE "${this.databaseName}" SET app.use_${providerName}_embedding = 'true'`
+                        `SET app.use_${providerName}_embedding = 'true'`
                     );
                     await tx.execute(query);
                 }
