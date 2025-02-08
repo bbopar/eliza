@@ -36,11 +36,12 @@ import {
     knowledgeTable,
     cacheTable,
 } from "./schema";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { v4 as uuid } from "uuid";
+import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
+import { v4 } from "uuid";
 import { runMigrations } from "./migrations";
 import pkg from "pg";
+import { Transaction } from "viem";
+import type { PgTransaction } from "drizzle-orm/pg-core";
 const { Pool } = pkg;
 
 export class DrizzleDatabaseAdapter
@@ -49,10 +50,14 @@ export class DrizzleDatabaseAdapter
 {
     private databaseUrl: string;
     private databaseName: string;
+    private readonly maxRetries: number = 3;
+    private readonly baseDelay: number = 1000; // 1 second
+    private readonly maxDelay: number = 10000; // 10 seconds
+    private readonly jitterMax: number = 1000; // 1 second
+    private readonly connectionTimeout: number = 5000; // 5 seconds
 
     constructor(
         databaseUrl: string,
-        // TODO: drizzle has it's own circuit breaker config...
         circuitBreakerConfig?: {
             failureThreshold?: number;
             resetTimeout?: number;
@@ -67,30 +72,6 @@ export class DrizzleDatabaseAdapter
         this.databaseUrl = databaseUrl;
         this.databaseName = this.setDatabaseName();
         this.db = drizzle(databaseUrl);
-    }
-
-    async init(): Promise<void> {
-        try {
-            await this.setEmbeddingProviderSettings();
-
-            const { rows } = await this.db.execute(sql`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'rooms'
-                );
-            `);
-
-            if (!rows[0].exists || !(await this.validateVectorSetup())) {
-                const pool = new Pool({
-                    connectionString: this.databaseUrl,
-                });
-                await runMigrations(pool);
-                await pool.end();
-            }
-        } catch (error) {
-            elizaLogger.error("Failed to initialize database:", error);
-            throw error;
-        }
     }
 
     private setDatabaseName(): string {
@@ -125,15 +106,13 @@ export class DrizzleDatabaseAdapter
                 }
             });
         } catch (error) {
-            if (
-                error instanceof Error &&
-                error.message.includes("tuple concurrently updated")
-            ) {
-                elizaLogger.info(
-                    "Database settings already updated by another connection"
-                );
-                return;
-            }
+            elizaLogger.error(
+                "Failed to configure database embedding provider settings:",
+                {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            );
             throw error;
         }
     }
@@ -158,6 +137,89 @@ export class DrizzleDatabaseAdapter
         }
     }
 
+    private async withDatabase<T>(
+        operation: () => Promise<T>,
+        context: string
+    ): Promise<T> {
+        return this.withCircuitBreaker(async () => {
+            return this.withRetry(operation);
+        }, context);
+    }
+
+    private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+        let lastError: Error = new Error("Unknown error"); // Initialize with default
+
+        for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error as Error;
+
+                if (attempt < this.maxRetries) {
+                    // Calculate delay with exponential backoff
+                    const backoffDelay = Math.min(
+                        this.baseDelay * Math.pow(2, attempt - 1),
+                        this.maxDelay
+                    );
+
+                    // Add jitter to prevent thundering herd
+                    const jitter = Math.random() * this.jitterMax;
+                    const delay = backoffDelay + jitter;
+
+                    elizaLogger.warn(
+                        `Database operation failed (attempt ${attempt}/${this.maxRetries}):`,
+                        {
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                            nextRetryIn: `${(delay / 1000).toFixed(1)}s`,
+                        }
+                    );
+
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                } else {
+                    elizaLogger.error("Max retry attempts reached:", {
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                        totalAttempts: attempt,
+                    });
+                    throw error instanceof Error
+                        ? error
+                        : new Error(String(error));
+                }
+            }
+        }
+
+        throw lastError;
+    }
+
+    async init(): Promise<void> {
+        try {
+            await this.setEmbeddingProviderSettings();
+
+            const { rows } = await this.db.execute(sql`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'rooms'
+                );
+            `);
+
+            if (!rows[0].exists || !(await this.validateVectorSetup())) {
+                const pool = new Pool({
+                    connectionString: this.databaseUrl,
+                });
+                await runMigrations(pool);
+                await pool.end();
+            }
+        } catch (error) {
+            elizaLogger.error("Failed to initialize database:", error);
+            throw error;
+        }
+    }
+
     async close(): Promise<void> {
         try {
             if (this.db && (this.db as any).client) {
@@ -171,8 +233,24 @@ export class DrizzleDatabaseAdapter
         }
     }
 
-    async getAccountById(userId: UUID): Promise<Account | null> {
+    async testConnection(): Promise<boolean> {
         try {
+            const result = await this.db.execute(sql`SELECT NOW()`);
+            elizaLogger.success(
+                "Database connection test successful:",
+                result.rows[0]
+            );
+            return true;
+        } catch (error) {
+            elizaLogger.error("Database connection test failed:", error);
+            throw new Error(
+                `Failed to connect to database: ${(error as Error).message}`
+            );
+        }
+    }
+
+    async getAccountById(userId: UUID): Promise<Account | null> {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select()
                 .from(accountTable)
@@ -191,40 +269,38 @@ export class DrizzleDatabaseAdapter
                 avatarUrl: account.avatarUrl ?? "",
                 details: account.details ?? {},
             };
-        } catch (error) {
-            elizaLogger.error("Failed to get account by ID:", {
-                error: error instanceof Error ? error.message : String(error),
-                userId,
-            });
-            throw error;
-        }
+        }, "getAccountById");
     }
 
     async createAccount(account: Account): Promise<boolean> {
-        try {
-            const accountId = account.id ?? uuid();
+        return this.withDatabase(async () => {
+            try {
+                const accountId = account.id ?? v4();
 
-            await this.db.insert(accountTable).values({
-                id: accountId,
-                name: account.name ?? null,
-                username: account.username ?? null,
-                email: account.email ?? "",
-                avatarUrl: account.avatarUrl ?? null,
-                details: sql`${account.details}::jsonb` || {},
-            });
+                await this.db.insert(accountTable).values({
+                    id: accountId,
+                    name: account.name ?? null,
+                    username: account.username ?? null,
+                    email: account.email ?? "",
+                    avatarUrl: account.avatarUrl ?? null,
+                    details: sql`${account.details}::jsonb` || {},
+                });
 
-            elizaLogger.debug("Account created successfully:", {
-                accountId,
-            });
+                elizaLogger.debug("Account created successfully:", {
+                    accountId,
+                });
 
-            return true;
-        } catch (error) {
-            elizaLogger.error("Error creating account:", {
-                error: error instanceof Error ? error.message : String(error),
-                accountId: account.id,
-            });
-            return false;
-        }
+                return true;
+            } catch (error) {
+                elizaLogger.error("Error creating account:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    accountId: account.id,
+                    name: account.name,
+                });
+                return false;
+            }
+        }, "createAccount");
     }
 
     async getMemories(params: {
@@ -239,7 +315,7 @@ export class DrizzleDatabaseAdapter
         if (!params.tableName) throw new Error("tableName is required");
         if (!params.roomId) throw new Error("roomId is required");
 
-        try {
+        return this.withDatabase(async () => {
             const conditions = [
                 eq(memoryTable.type, params.tableName),
                 eq(memoryTable.roomId, params.roomId),
@@ -285,13 +361,7 @@ export class DrizzleDatabaseAdapter
                 roomId: row.roomId as UUID,
                 unique: row.unique,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to fetch memories:", {
-                error: error instanceof Error ? error.message : String(error),
-                params,
-            });
-            throw error;
-        }
+        }, "getMemories");
     }
 
     async getMemoriesByRoomIds(params: {
@@ -300,7 +370,7 @@ export class DrizzleDatabaseAdapter
         tableName: string;
         limit?: number;
     }): Promise<Memory[]> {
-        try {
+        return this.withDatabase(async () => {
             if (params.roomIds.length === 0) return [];
 
             const conditions = [
@@ -335,18 +405,11 @@ export class DrizzleDatabaseAdapter
                 roomId: row.roomId as UUID,
                 unique: row.unique,
             })) as Memory[];
-        } catch (error) {
-            elizaLogger.error("Error in getMemoriesByRoomIds:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomIds: params.roomIds,
-                tableName: params.tableName,
-            });
-            throw error;
-        }
+        }, "getMemoriesByRoomIds");
     }
 
     async getMemoryById(id: UUID): Promise<Memory | null> {
-        try {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select()
                 .from(memoryTable)
@@ -369,19 +432,15 @@ export class DrizzleDatabaseAdapter
                 roomId: row.roomId as UUID,
                 unique: row.unique,
             };
-        } catch (error) {
-            elizaLogger.error("Error in getMemoryById:", error);
-            throw error;
-        }
+        }, "getMemoryById");
     }
 
     async getMemoriesByIds(
         memoryIds: UUID[],
         tableName?: string
     ): Promise<Memory[]> {
-        if (memoryIds.length === 0) return [];
-
-        try {
+        return this.withDatabase(async () => {
+            if (memoryIds.length === 0) return [];
             const conditions = [inArray(memoryTable.id, memoryIds)];
 
             if (tableName) {
@@ -407,17 +466,10 @@ export class DrizzleDatabaseAdapter
                 roomId: row.roomId as UUID,
                 unique: row.unique,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to fetch memories by IDs:", {
-                error: error instanceof Error ? error.message : String(error),
-                memoryIds,
-                tableName,
-            });
-            throw error;
-        }
+        }, "getMemoriesByIds");
     }
 
-    async getCachedEmbeddings(params: {
+    async getCachedEmbeddings(opts: {
         query_table_name: string;
         query_threshold: number;
         query_input: string;
@@ -425,56 +477,59 @@ export class DrizzleDatabaseAdapter
         query_field_sub_name: string;
         query_match_count: number;
     }): Promise<{ embedding: number[]; levenshtein_score: number }[]> {
-        try {
-            const results = await this.db.execute<{
-                embedding: number[];
-                levenshtein_score: number;
-            }>(sql`
-                WITH content_text AS (
-                    SELECT 
+        return this.withDatabase(async () => {
+            try {
+                const results = await this.db.execute<{
+                    embedding: number[];
+                    levenshtein_score: number;
+                }>(sql`
+                    WITH content_text AS (
+                        SELECT
+                            embedding,
+                            COALESCE(
+                                content->>${opts.query_field_sub_name},
+                                ''
+                            ) as content_text
+                        FROM memories
+                        WHERE type = ${opts.query_table_name}
+                            AND content->>${opts.query_field_sub_name} IS NOT NULL
+                    )
+                    SELECT
                         embedding,
-                        COALESCE(
-                            content->>${params.query_field_sub_name},
-                            ''
-                        ) as content_text
-                    FROM memories 
-                    WHERE type = ${params.query_table_name}
-                    AND content->>${params.query_field_sub_name} IS NOT NULL
-                )
-                SELECT 
-                    embedding,
-                    levenshtein(${params.query_input}, content_text) as levenshtein_score
-                FROM content_text
-                WHERE levenshtein(${params.query_input}, content_text) <= ${params.query_threshold}
-                ORDER BY levenshtein_score
-                LIMIT ${params.query_match_count}
-            `);
+                        levenshtein(${opts.query_input}, content_text) as levenshtein_score
+                    FROM content_text
+                    WHERE levenshtein(${opts.query_input}, content_text) <= ${opts.query_threshold}
+                    ORDER BY levenshtein_score
+                    LIMIT ${opts.query_match_count}
+                `);
 
-            return results.rows
-                .map((row) => ({
-                    embedding: Array.isArray(row.embedding)
-                        ? row.embedding
-                        : typeof row.embedding === "string"
-                        ? JSON.parse(row.embedding)
-                        : [],
-                    levenshtein_score: Number(row.levenshtein_score),
-                }))
-                .filter((row) => Array.isArray(row.embedding));
-        } catch (error) {
-            elizaLogger.error("Error in getCachedEmbeddings:", {
-                error: error instanceof Error ? error.message : String(error),
-                tableName: params.query_table_name,
-                fieldName: params.query_field_name,
-            });
-            if (
-                error instanceof Error &&
-                error.message ===
-                    "levenshtein argument exceeds maximum length of 255 characters"
-            ) {
-                return [];
+                return results.rows
+                    .map((row) => ({
+                        embedding: Array.isArray(row.embedding)
+                            ? row.embedding
+                            : typeof row.embedding === "string"
+                            ? JSON.parse(row.embedding)
+                            : [],
+                        levenshtein_score: Number(row.levenshtein_score),
+                    }))
+                    .filter((row) => Array.isArray(row.embedding));
+            } catch (error) {
+                elizaLogger.error("Error in getCachedEmbeddings:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    tableName: opts.query_table_name,
+                    fieldName: opts.query_field_name,
+                });
+                if (
+                    error instanceof Error &&
+                    error.message ===
+                        "levenshtein argument exceeds maximum length of 255 characters"
+                ) {
+                    return [];
+                }
+                throw error;
             }
-            throw error;
-        }
+        }, "getCachedEmbeddings");
     }
 
     async log(params: {
@@ -483,95 +538,105 @@ export class DrizzleDatabaseAdapter
         roomId: UUID;
         type: string;
     }): Promise<void> {
-        try {
-            await this.db.insert(logTable).values({
-                body: sql`${params.body}::jsonb`,
-                userId: params.userId,
-                roomId: params.roomId,
-                type: params.type,
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to create log entry:", {
-                error: error instanceof Error ? error.message : String(error),
-                type: params.type,
-                roomId: params.roomId,
-                userId: params.userId,
-            });
-            throw error;
-        }
+        return this.withDatabase(async () => {
+            try {
+                await this.db.insert(logTable).values({
+                    body: sql`${params.body}::jsonb`,
+                    userId: params.userId,
+                    roomId: params.roomId,
+                    type: params.type,
+                });
+            } catch (error) {
+                elizaLogger.error("Failed to create log entry:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    type: params.type,
+                    roomId: params.roomId,
+                    userId: params.userId,
+                });
+                throw error;
+            }
+        }, "log");
     }
 
-    async getActorDetails(params: { roomId: UUID }): Promise<Actor[]> {
+    async getActorDetails(params: { roomId: string }): Promise<Actor[]> {
         if (!params.roomId) {
             throw new Error("roomId is required");
         }
 
-        try {
-            const result = await this.db
-                .select({
-                    id: accountTable.id,
-                    name: accountTable.name,
-                    username: accountTable.username,
-                    details: accountTable.details,
-                })
-                .from(participantTable)
-                .leftJoin(
-                    accountTable,
-                    eq(participantTable.userId, accountTable.id)
-                )
-                .where(eq(participantTable.roomId, params.roomId))
-                .orderBy(accountTable.name);
+        return this.withDatabase(async () => {
+            try {
+                const result = await this.db
+                    .select({
+                        id: accountTable.id,
+                        name: accountTable.name,
+                        username: accountTable.username,
+                        details: accountTable.details,
+                    })
+                    .from(participantTable)
+                    .leftJoin(
+                        accountTable,
+                        eq(participantTable.userId, accountTable.id)
+                    )
+                    .where(eq(participantTable.roomId, params.roomId))
+                    .orderBy(accountTable.name);
 
-            elizaLogger.debug("Retrieved actor details:", {
-                roomId: params.roomId,
-                actorCount: result.length,
-            });
+                elizaLogger.debug("Retrieved actor details:", {
+                    roomId: params.roomId,
+                    actorCount: result.length,
+                });
 
-            return result.map((row) => {
-                try {
-                    const details =
-                        typeof row.details === "string"
-                            ? JSON.parse(row.details)
-                            : row.details || {};
+                return result.map((row) => {
+                    try {
+                        const details =
+                            typeof row.details === "string"
+                                ? JSON.parse(row.details)
+                                : row.details || {};
 
-                    return {
-                        id: row.id as UUID,
-                        name: row.name ?? "",
-                        username: row.username ?? "",
-                        details: {
-                            tagline: details.tagline ?? "",
-                            summary: details.summary ?? "",
-                            quote: details.quote ?? "",
-                        },
-                    };
-                } catch (error) {
-                    elizaLogger.warn("Failed to parse actor details:", {
-                        actorId: row.id,
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                    });
+                        return {
+                            id: row.id as UUID,
+                            name: row.name ?? "",
+                            username: row.username ?? "",
+                            details: {
+                                tagline: details.tagline ?? "",
+                                summary: details.summary ?? "",
+                                quote: details.quote ?? "",
+                            },
+                        };
+                    } catch (error) {
+                        elizaLogger.warn("Failed to parse actor details:", {
+                            actorId: row.id,
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        });
 
-                    return {
-                        id: row.id as UUID,
-                        name: row.name ?? "",
-                        username: row.username ?? "",
-                        details: {
-                            tagline: "",
-                            summary: "",
-                            quote: "",
-                        },
-                    };
-                }
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to fetch actor details:", {
-                roomId: params.roomId,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            throw error;
-        }
+                        return {
+                            id: row.id as UUID,
+                            name: row.name ?? "",
+                            username: row.username ?? "",
+                            details: {
+                                tagline: "",
+                                summary: "",
+                                quote: "",
+                            },
+                        };
+                    }
+                });
+            } catch (error) {
+                elizaLogger.error("Failed to fetch actor details:", {
+                    roomId: params.roomId,
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                });
+                throw new Error(
+                    `Failed to fetch actor details: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            }
+        }, "getActorDetails");
     }
 
     async searchMemories(params: {
@@ -583,48 +648,26 @@ export class DrizzleDatabaseAdapter
         match_count: number;
         unique: boolean;
     }): Promise<Memory[]> {
-        try {
-            return await this.searchMemoriesByEmbedding(params.embedding, {
-                match_threshold: params.match_threshold,
-                count: params.match_count,
-                agentId: params.agentId,
-                roomId: params.roomId,
-                unique: params.unique,
-                tableName: params.tableName,
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to search memories:", {
-                error: error instanceof Error ? error.message : String(error),
-                tableName: params.tableName,
-                agentId: params.agentId,
-                roomId: params.roomId,
-            });
-            throw error;
-        }
+        return await this.searchMemoriesByEmbedding(params.embedding, {
+            match_threshold: params.match_threshold,
+            count: params.match_count,
+            agentId: params.agentId,
+            roomId: params.roomId,
+            unique: params.unique,
+            tableName: params.tableName,
+        });
     }
 
     async updateGoalStatus(params: {
         goalId: UUID;
         status: GoalStatus;
     }): Promise<void> {
-        try {
+        return this.withDatabase(async () => {
             await this.db
                 .update(goalTable)
                 .set({ status: params.status })
                 .where(eq(goalTable.id, params.goalId));
-
-            elizaLogger.debug("Updated goal status:", {
-                goalId: params.goalId,
-                newStatus: params.status,
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to update goal status:", {
-                error: error instanceof Error ? error.message : String(error),
-                goalId: params.goalId,
-                status: params.status,
-            });
-            throw error;
-        }
+        }, "updateGoalStatus");
     }
 
     async searchMemoriesByEmbedding(
@@ -638,7 +681,7 @@ export class DrizzleDatabaseAdapter
             tableName: string;
         }
     ): Promise<Memory[]> {
-        try {
+        return this.withDatabase(async () => {
             const cleanVector = embedding.map((n) =>
                 Number.isFinite(n) ? Number(n.toFixed(6)) : 0
             );
@@ -697,25 +740,12 @@ export class DrizzleDatabaseAdapter
                 unique: row.unique,
                 similarity: row.similarity,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to search memories by embedding:", {
-                error: error instanceof Error ? error.message : String(error),
-                vectorLength: embedding.length,
-                tableName: params.tableName,
-                roomId: params.roomId,
-                agentId: params.agentId,
-            });
-            throw error;
-        }
+        }, "searchMemoriesByEmbedding");
     }
 
-    async createMemory(
-        memory: Memory,
-        tableName: string,
-        unique?: boolean
-    ): Promise<void> {
-        try {
-            elizaLogger.info("DrizzleAdapter createMemory:", {
+    async createMemory(memory: Memory, tableName: string): Promise<void> {
+        return this.withDatabase(async () => {
+            elizaLogger.debug("DrizzleAdapter createMemory:", {
                 memoryId: memory.id,
                 embeddingLength: memory.embedding?.length,
                 contentLength: memory.content?.text?.length,
@@ -743,7 +773,7 @@ export class DrizzleDatabaseAdapter
 
             await this.db.insert(memoryTable).values([
                 {
-                    id: memory.id ?? uuid(),
+                    id: memory.id ?? v4(),
                     type: tableName,
                     content: sql`${contentToInsert}::jsonb`,
                     embedding: memory.embedding,
@@ -754,20 +784,11 @@ export class DrizzleDatabaseAdapter
                     createdAt: memory.createdAt,
                 },
             ]);
-        } catch (error) {
-            elizaLogger.debug("Error in createMemory:", error);
-            elizaLogger.error("Failed to create memory:", {
-                error: error instanceof Error ? error.message : String(error),
-                memoryId: memory.id,
-                tableName,
-                roomId: memory.roomId,
-            });
-            throw error;
-        }
+        }, "createMemory");
     }
 
     async removeMemory(memoryId: UUID, tableName: string): Promise<void> {
-        try {
+        return this.withDatabase(async () => {
             await this.db
                 .delete(memoryTable)
                 .where(
@@ -776,23 +797,11 @@ export class DrizzleDatabaseAdapter
                         eq(memoryTable.type, tableName)
                     )
                 );
-
-            elizaLogger.debug("Memory removed successfully:", {
-                memoryId,
-                tableName,
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to remove memory:", {
-                error: error instanceof Error ? error.message : String(error),
-                memoryId,
-                tableName,
-            });
-            throw error;
-        }
+        }, "removeMemory");
     }
 
     async removeAllMemories(roomId: UUID, tableName: string): Promise<void> {
-        try {
+        return this.withDatabase(async () => {
             await this.db
                 .delete(memoryTable)
                 .where(
@@ -806,14 +815,7 @@ export class DrizzleDatabaseAdapter
                 roomId,
                 tableName,
             });
-        } catch (error) {
-            elizaLogger.error("Failed to remove all memories:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-                tableName,
-            });
-            throw error;
-        }
+        }, "removeAllMemories");
     }
 
     async countMemories(
@@ -823,7 +825,7 @@ export class DrizzleDatabaseAdapter
     ): Promise<number> {
         if (!tableName) throw new Error("tableName is required");
 
-        try {
+        return this.withDatabase(async () => {
             const conditions = [
                 eq(memoryTable.roomId, roomId),
                 eq(memoryTable.type, tableName),
@@ -839,15 +841,7 @@ export class DrizzleDatabaseAdapter
                 .where(and(...conditions));
 
             return Number(result[0]?.count ?? 0);
-        } catch (error) {
-            elizaLogger.error("Failed to count memories:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-                tableName,
-                unique,
-            });
-            throw error;
-        }
+        }, "countMemories");
     }
 
     async getGoals(params: {
@@ -856,7 +850,7 @@ export class DrizzleDatabaseAdapter
         onlyInProgress?: boolean;
         count?: number;
     }): Promise<Goal[]> {
-        try {
+        return this.withDatabase(async () => {
             const conditions = [eq(goalTable.roomId, params.roomId)];
 
             if (params.userId) {
@@ -889,41 +883,36 @@ export class DrizzleDatabaseAdapter
                 objectives: row.objectives as any[],
                 createdAt: row.createdAt,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to get goals:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId: params.roomId,
-                userId: params.userId,
-                onlyInProgress: params.onlyInProgress,
-            });
-            throw error;
-        }
+        }, "getGoals");
     }
 
     async updateGoal(goal: Goal): Promise<void> {
-        try {
-            await this.db
-                .update(goalTable)
-                .set({
-                    name: goal.name,
+        return this.withDatabase(async () => {
+            try {
+                await this.db
+                    .update(goalTable)
+                    .set({
+                        name: goal.name,
+                        status: goal.status,
+                        objectives: goal.objectives,
+                    })
+                    .where(eq(goalTable.id, goal.id as string));
+            } catch (error) {
+                elizaLogger.error("Failed to update goal:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    goalId: goal.id,
                     status: goal.status,
-                    objectives: goal.objectives,
-                })
-                .where(eq(goalTable.id, goal.id as string));
-        } catch (error) {
-            elizaLogger.error("Failed to update goal:", {
-                error: error instanceof Error ? error.message : String(error),
-                goalId: goal.id,
-                status: goal.status,
-            });
-            throw error;
-        }
+                });
+                throw error;
+            }
+        }, "updateGoal");
     }
 
     async createGoal(goal: Goal): Promise<void> {
         try {
             await this.db.insert(goalTable).values({
-                id: goal.id ?? uuid(),
+                id: goal.id ?? v4(),
                 roomId: goal.roomId,
                 userId: goal.userId,
                 name: goal.name,
@@ -931,9 +920,10 @@ export class DrizzleDatabaseAdapter
                 objectives: sql`${goal.objectives}::jsonb`,
             });
         } catch (error) {
-            elizaLogger.error("Failed to create goal:", {
-                error: error instanceof Error ? error.message : String(error),
+            elizaLogger.error("Failed to update goal:", {
                 goalId: goal.id,
+                error: error instanceof Error ? error.message : String(error),
+                status: goal.status,
             });
             throw error;
         }
@@ -942,36 +932,33 @@ export class DrizzleDatabaseAdapter
     async removeGoal(goalId: UUID): Promise<void> {
         if (!goalId) throw new Error("Goal ID is required");
 
-        try {
-            await this.db.delete(goalTable).where(eq(goalTable.id, goalId));
+        return this.withDatabase(async () => {
+            try {
+                await this.db.delete(goalTable).where(eq(goalTable.id, goalId));
 
-            elizaLogger.debug("Goal removal attempt:", {
-                goalId,
-                removed: true,
-            });
-        } catch (error) {
-            elizaLogger.error("Failed to remove goal:", {
-                error: error instanceof Error ? error.message : String(error),
-                goalId,
-            });
-            throw error;
-        }
+                elizaLogger.debug("Goal removal attempt:", {
+                    goalId,
+                    removed: true,
+                });
+            } catch (error) {
+                elizaLogger.error("Failed to remove goal:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    goalId,
+                });
+                throw error;
+            }
+        }, "removeGoal");
     }
 
     async removeAllGoals(roomId: UUID): Promise<void> {
-        try {
+        return this.withDatabase(async () => {
             await this.db.delete(goalTable).where(eq(goalTable.roomId, roomId));
-        } catch (error) {
-            elizaLogger.error("Failed to remove all goals:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-            });
-            throw error;
-        }
+        }, "removeAllGoals");
     }
 
     async getRoom(roomId: UUID): Promise<UUID | null> {
-        try {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select({
                     id: roomTable.id,
@@ -981,108 +968,99 @@ export class DrizzleDatabaseAdapter
                 .limit(1);
 
             return (result[0]?.id as UUID) ?? null;
-        } catch (error) {
-            elizaLogger.error("Failed to get room:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-            });
-            throw error;
-        }
+        }, "getRoom");
     }
 
     async createRoom(roomId?: UUID): Promise<UUID> {
-        try {
-            const id = roomId ?? uuid();
-
+        return this.withDatabase(async () => {
+            const newRoomId = roomId || v4();
             await this.db.insert(roomTable).values([
                 {
-                    id: id as string,
+                    id: newRoomId,
                 },
             ]);
-
-            return id as UUID;
-        } catch (error) {
-            elizaLogger.error("Failed to create room:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-            });
-            throw error;
-        }
+            return newRoomId as UUID;
+        }, "createRoom");
     }
 
     async removeRoom(roomId: UUID): Promise<void> {
-        try {
+        if (!roomId) throw new Error("Room ID is required");
+        return this.withDatabase(async () => {
             await this.db.delete(roomTable).where(eq(roomTable.id, roomId));
-        } catch (error) {
-            elizaLogger.error("Failed to remove room:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-            });
-            throw error;
-        }
+        }, "removeRoom");
     }
 
     async getRoomsForParticipant(userId: UUID): Promise<UUID[]> {
-        const result = await this.db
-            .select({ roomId: participantTable.roomId })
-            .from(participantTable)
-            .where(eq(participantTable.userId, userId));
+        return this.withDatabase(async () => {
+            const result = await this.db
+                .select({ roomId: participantTable.roomId })
+                .from(participantTable)
+                .where(eq(participantTable.userId, userId));
 
-        return result.map((row) => row.roomId as UUID);
+            return result.map((row) => row.roomId as UUID);
+        }, "getRoomsForParticipant");
     }
 
     async getRoomsForParticipants(userIds: UUID[]): Promise<UUID[]> {
-        const result = await this.db
-            .selectDistinct({ roomId: participantTable.roomId })
-            .from(participantTable)
-            .where(inArray(participantTable.userId, userIds));
+        return this.withDatabase(async () => {
+            const result = await this.db
+                .selectDistinct({ roomId: participantTable.roomId })
+                .from(participantTable)
+                .where(inArray(participantTable.userId, userIds));
 
-        return result.map((row) => row.roomId as UUID);
+            return result.map((row) => row.roomId as UUID);
+        }, "getRoomsForParticipants");
     }
 
     async addParticipant(userId: UUID, roomId: UUID): Promise<boolean> {
-        try {
-            await this.db.insert(participantTable).values({
-                id: uuid(),
-                userId,
-                roomId,
-            });
-            return true;
-        } catch (error) {
-            elizaLogger.error("Failed to add participant:", {
-                error: error instanceof Error ? error.message : String(error),
-                userId,
-                roomId,
-            });
-            return false;
-        }
+        return this.withDatabase(async () => {
+            try {
+                await this.db.insert(participantTable).values({
+                    id: v4(),
+                    userId,
+                    roomId,
+                });
+                return true;
+            } catch (error) {
+                elizaLogger.error("Failed to add participant:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    userId,
+                    roomId,
+                });
+                return false;
+            }
+        }, "addParticipant");
     }
 
     async removeParticipant(userId: UUID, roomId: UUID): Promise<boolean> {
-        try {
-            const result = await this.db
-                .delete(participantTable)
-                .where(
-                    and(
-                        eq(participantTable.userId, userId),
-                        eq(participantTable.roomId, roomId)
+        return this.withDatabase(async () => {
+            try {
+                const result = await this.db
+                    .delete(participantTable)
+                    .where(
+                        and(
+                            eq(participantTable.userId, userId),
+                            eq(participantTable.roomId, roomId)
+                        )
                     )
-                )
-                .returning();
+                    .returning();
 
-            return result.length > 0;
-        } catch (error) {
-            elizaLogger.error("Failed to remove participant:", {
-                error: error instanceof Error ? error.message : String(error),
-                userId,
-                roomId,
-            });
-            throw error;
-        }
+                return result.length > 0;
+            } catch (error) {
+                elizaLogger.error("Failed to remove participant:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    userId,
+                    roomId,
+                });
+                return false;
+            }
+        }, "removeParticipant");
     }
 
     async getParticipantsForAccount(userId: UUID): Promise<Participant[]> {
-        try {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select({
                     id: participantTable.id,
@@ -1099,37 +1077,25 @@ export class DrizzleDatabaseAdapter
                 id: row.id as UUID,
                 account: account!,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to get participants for account:", {
-                error: error instanceof Error ? error.message : String(error),
-                userId,
-            });
-            throw error;
-        }
+        }, "getParticipantsForAccount");
     }
 
     async getParticipantsForRoom(roomId: UUID): Promise<UUID[]> {
-        try {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select({ userId: participantTable.userId })
                 .from(participantTable)
                 .where(eq(participantTable.roomId, roomId));
 
             return result.map((row) => row.userId as UUID);
-        } catch (error) {
-            elizaLogger.error("Failed to get participants for room:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-            });
-            throw error;
-        }
+        }, "getParticipantsForRoom");
     }
 
     async getParticipantUserState(
         roomId: UUID,
         userId: UUID
     ): Promise<"FOLLOWED" | "MUTED" | null> {
-        try {
+        return this.withDatabase(async () => {
             const result = await this.db
                 .select({ userState: participantTable.userState })
                 .from(participantTable)
@@ -1144,14 +1110,7 @@ export class DrizzleDatabaseAdapter
             return (
                 (result[0]?.userState as "FOLLOWED" | "MUTED" | null) ?? null
             );
-        } catch (error) {
-            elizaLogger.error("Failed to get participant user state:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-                userId,
-            });
-            throw error;
-        }
+        }, "getParticipantUserState");
     }
 
     async setParticipantUserState(
@@ -1159,7 +1118,7 @@ export class DrizzleDatabaseAdapter
         userId: UUID,
         state: "FOLLOWED" | "MUTED" | null
     ): Promise<void> {
-        try {
+        return this.withDatabase(async () => {
             await this.db
                 .update(participantTable)
                 .set({ userState: state })
@@ -1169,124 +1128,142 @@ export class DrizzleDatabaseAdapter
                         eq(participantTable.userId, userId)
                     )
                 );
-        } catch (error) {
-            elizaLogger.error("Failed to set participant user state:", {
-                error: error instanceof Error ? error.message : String(error),
-                roomId,
-                userId,
-                state,
-            });
-            throw error;
-        }
+        }, "setParticipantUserState");
     }
 
     async createRelationship(params: {
         userA: UUID;
         userB: UUID;
     }): Promise<boolean> {
-        try {
-            const relationshipId = uuid();
-            await this.db.insert(relationshipTable).values({
-                id: relationshipId,
-                userA: params.userA,
-                userB: params.userB,
-                userId: params.userA,
-            });
+        // Input validation
+        if (!params.userA || !params.userB) {
+            throw new Error("userA and userB are required");
+        }
 
-            elizaLogger.debug("Relationship created successfully:", {
-                relationshipId,
-                userA: params.userA,
-                userB: params.userB,
-            });
-
-            return true;
-        } catch (error) {
-            if ((error as { code?: string }).code === "23505") {
-                elizaLogger.warn("Relationship already exists:", {
+        return this.withDatabase(async () => {
+            try {
+                const relationshipId = v4();
+                await this.db.insert(relationshipTable).values({
+                    id: relationshipId,
                     userA: params.userA,
                     userB: params.userB,
-                    error:
-                        error instanceof Error ? error.message : String(error),
+                    userId: params.userA,
                 });
+
+                elizaLogger.debug("Relationship created successfully:", {
+                    relationshipId,
+                    userA: params.userA,
+                    userB: params.userB,
+                });
+
+                return true;
+            } catch (error) {
+                // Check for unique constraint violation or other specific errors
+                if ((error as { code?: string }).code === "23505") {
+                    // Unique violation
+                    elizaLogger.warn("Relationship already exists:", {
+                        userA: params.userA,
+                        userB: params.userB,
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                    });
+                } else {
+                    elizaLogger.error("Failed to create relationship:", {
+                        userA: params.userA,
+                        userB: params.userB,
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                    });
+                }
                 return false;
             }
-
-            elizaLogger.error("Failed to create relationship:", {
-                error: error instanceof Error ? error.message : String(error),
-                userA: params.userA,
-                userB: params.userB,
-            });
-            return false;
-        }
+        }, "createRelationship");
     }
 
     async getRelationship(params: {
         userA: UUID;
         userB: UUID;
     }): Promise<Relationship | null> {
-        try {
-            const result = await this.db
-                .select()
-                .from(relationshipTable)
-                .where(
-                    or(
-                        and(
-                            eq(relationshipTable.userA, params.userA),
-                            eq(relationshipTable.userB, params.userB)
-                        ),
-                        and(
-                            eq(relationshipTable.userA, params.userB),
-                            eq(relationshipTable.userB, params.userA)
+        if (!params.userA || !params.userB) {
+            throw new Error("userA and userB are required");
+        }
+
+        return this.withDatabase(async () => {
+            try {
+                const result = await this.db
+                    .select()
+                    .from(relationshipTable)
+                    .where(
+                        or(
+                            and(
+                                eq(relationshipTable.userA, params.userA),
+                                eq(relationshipTable.userB, params.userB)
+                            ),
+                            and(
+                                eq(relationshipTable.userA, params.userB),
+                                eq(relationshipTable.userB, params.userA)
+                            )
                         )
                     )
-                )
-                .limit(1);
+                    .limit(1);
 
-            if (result.length > 0) {
-                return result[0] as unknown as Relationship;
+                if (result.length > 0) {
+                    return result[0] as unknown as Relationship;
+                }
+
+                elizaLogger.debug("No relationship found between users:", {
+                    userA: params.userA,
+                    userB: params.userB,
+                });
+                return null;
+            } catch (error) {
+                elizaLogger.error("Error fetching relationship:", {
+                    userA: params.userA,
+                    userB: params.userB,
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                });
+                throw error;
             }
-
-            elizaLogger.debug("No relationship found between users:", {
-                userA: params.userA,
-                userB: params.userB,
-            });
-            return null;
-        } catch (error) {
-            elizaLogger.error("Error fetching relationship:", {
-                error: error instanceof Error ? error.message : String(error),
-                userA: params.userA,
-                userB: params.userB,
-            });
-            throw error;
-        }
+        }, "getRelationship");
     }
 
     async getRelationships(params: { userId: UUID }): Promise<Relationship[]> {
-        try {
-            const result = await this.db
-                .select()
-                .from(relationshipTable)
-                .where(
-                    or(
-                        eq(relationshipTable.userA, params.userId),
-                        eq(relationshipTable.userB, params.userId)
-                    )
-                )
-                .orderBy(desc(relationshipTable.createdAt));
-
-            elizaLogger.debug("Retrieved relationships:", {
-                userId: params.userId,
-                count: result.length,
-            });
-
-            return result as unknown as Relationship[];
-        } catch (error) {
-            elizaLogger.error("Failed to fetch relationships:", {
-                error: error instanceof Error ? error.message : String(error),
-                userId: params.userId,
-            });
-            throw error;
+        if (!params.userId) {
+            throw new Error("userId is required");
         }
+        return this.withDatabase(async () => {
+            try {
+                const result = await this.db
+                    .select()
+                    .from(relationshipTable)
+                    .where(
+                        or(
+                            eq(relationshipTable.userA, params.userId),
+                            eq(relationshipTable.userB, params.userId)
+                        )
+                    )
+                    .orderBy(desc(relationshipTable.createdAt));
+
+                elizaLogger.debug("Retrieved relationships:", {
+                    userId: params.userId,
+                    count: result.length,
+                });
+
+                return result as unknown as Relationship[];
+            } catch (error) {
+                elizaLogger.error("Failed to fetch relationships:", {
+                    userId: params.userId,
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                });
+                throw error;
+            }
+        }, "getRelationships");
     }
 
     async getKnowledge(params: {
@@ -1295,7 +1272,7 @@ export class DrizzleDatabaseAdapter
         limit?: number;
         query?: string;
     }): Promise<RAGKnowledgeItem[]> {
-        try {
+        return this.withDatabase(async () => {
             let conditions = [
                 or(
                     eq(knowledgeTable.agentId, params.agentId),
@@ -1329,15 +1306,7 @@ export class DrizzleDatabaseAdapter
                     : undefined,
                 createdAt: row.createdAt,
             }));
-        } catch (error) {
-            elizaLogger.error("Failed to get knowledge:", {
-                error: error instanceof Error ? error.message : String(error),
-                id: params.id,
-                agentId: params.agentId,
-                limit: params.limit,
-            });
-            throw error;
-        }
+        }, "getKnowledge");
     }
 
     async searchKnowledge(params: {
@@ -1347,7 +1316,7 @@ export class DrizzleDatabaseAdapter
         match_count: number;
         searchText?: string;
     }): Promise<RAGKnowledgeItem[]> {
-        try {
+        return this.withDatabase(async () => {
             const cacheKey = `embedding_${params.agentId}_${params.searchText}`;
 
             const cachedResult = await this.getCache({
@@ -1424,14 +1393,7 @@ export class DrizzleDatabaseAdapter
             });
 
             return mappedResults;
-        } catch (error) {
-            elizaLogger.error("Error in searchKnowledge:", {
-                error: error instanceof Error ? error.message : String(error),
-                agentId: params.agentId,
-                searchText: params.searchText,
-            });
-            throw error;
-        }
+        }, "searchKnowledge");
     }
 
     async createKnowledge(knowledge: RAGKnowledgeItem): Promise<void> {
@@ -1440,19 +1402,24 @@ export class DrizzleDatabaseAdapter
                 const metadata = knowledge.content.metadata || {};
 
                 if (metadata.isChunk && metadata.originalId) {
-                    await this.createKnowledgeChunk({
-                        id: knowledge.id,
-                        originalId: metadata.originalId,
-                        agentId: metadata.isShared ? null : knowledge.agentId,
-                        content:
-                            typeof knowledge.content === "string"
-                                ? JSON.parse(knowledge.content)
-                                : knowledge.content,
-                        embedding: knowledge.embedding,
-                        chunkIndex: metadata.chunkIndex || 0,
-                        isShared: metadata.isShared || false,
-                        createdAt: knowledge.createdAt || Date.now(),
-                    });
+                    await this.createKnowledgeChunk(
+                        {
+                            id: knowledge.id,
+                            originalId: metadata.originalId,
+                            agentId: metadata.isShared
+                                ? null
+                                : knowledge.agentId,
+                            content:
+                                typeof knowledge.content === "string"
+                                    ? JSON.parse(knowledge.content)
+                                    : knowledge.content,
+                            embedding: knowledge.embedding,
+                            chunkIndex: metadata.chunkIndex || 0,
+                            isShared: metadata.isShared || false,
+                            createdAt: knowledge.createdAt || Date.now(),
+                        },
+                        tx
+                    );
                 } else {
                     await tx.insert(knowledgeTable).values({
                         id: knowledge.id,
@@ -1479,16 +1446,19 @@ export class DrizzleDatabaseAdapter
         });
     }
 
-    private async createKnowledgeChunk(params: {
-        id: UUID;
-        originalId: UUID;
-        agentId: UUID | null;
-        content: any;
-        embedding: Float32Array | undefined | null;
-        chunkIndex: number;
-        isShared: boolean;
-        createdAt: number;
-    }): Promise<void> {
+    private async createKnowledgeChunk(
+        params: {
+            id: UUID;
+            originalId: UUID;
+            agentId: UUID | null;
+            content: any;
+            embedding: Float32Array | undefined | null;
+            chunkIndex: number;
+            isShared: boolean;
+            createdAt: number;
+        },
+        tx: NodePgDatabase
+    ): Promise<void> {
         const embedding = params.embedding
             ? Array.from(params.embedding)
             : null;
@@ -1502,7 +1472,7 @@ export class DrizzleDatabaseAdapter
             },
         };
 
-        await this.db.insert(knowledgeTable).values({
+        await tx.insert(knowledgeTable).values({
             id: params.id,
             agentId: params.agentId,
             content: sql`${contentWithPatternId}::jsonb`,
@@ -1516,58 +1486,68 @@ export class DrizzleDatabaseAdapter
     }
 
     async removeKnowledge(id: UUID): Promise<void> {
-        try {
-            await this.db
-                .delete(knowledgeTable)
-                .where(eq(knowledgeTable.id, id));
-        } catch (error) {
-            elizaLogger.error("Failed to remove knowledge:", {
-                error: error instanceof Error ? error.message : String(error),
-                id,
-            });
-            throw error;
-        }
+        return this.withDatabase(async () => {
+            try {
+                await this.db
+                    .delete(knowledgeTable)
+                    .where(eq(knowledgeTable.id, id));
+            } catch (error) {
+                elizaLogger.error("Failed to remove knowledge:", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    id,
+                });
+                throw error;
+            }
+        }, "removeKnowledge");
     }
 
     async clearKnowledge(agentId: UUID, shared?: boolean): Promise<void> {
-        try {
-            await this.db
-                .delete(knowledgeTable)
-                .where(eq(knowledgeTable.agentId, agentId));
-        } catch (error) {
-            elizaLogger.error("Failed to clear knowledge:", {
-                error: error instanceof Error ? error.message : String(error),
-                agentId,
-                shared,
-            });
-            throw error;
-        }
+        return this.withDatabase(async () => {
+            if (shared) {
+                await this.db
+                    .delete(knowledgeTable)
+                    .where(
+                        or(
+                            eq(knowledgeTable.agentId, agentId),
+                            eq(knowledgeTable.isShared, true)
+                        )
+                    );
+            } else {
+                await this.db
+                    .delete(knowledgeTable)
+                    .where(eq(knowledgeTable.agentId, agentId));
+            }
+        }, "clearKnowledge");
     }
 
     async getCache(params: {
         agentId: UUID;
         key: string;
     }): Promise<string | undefined> {
-        try {
-            const result = await this.db
-                .select()
-                .from(cacheTable)
-                .where(
-                    and(
-                        eq(cacheTable.agentId, params.agentId),
-                        eq(cacheTable.key, params.key)
-                    )
-                );
+        return this.withDatabase(async () => {
+            try {
+                const result = await this.db
+                    .select()
+                    .from(cacheTable)
+                    .where(
+                        and(
+                            eq(cacheTable.agentId, params.agentId),
+                            eq(cacheTable.key, params.key)
+                        )
+                    );
 
-            return result[0]?.value || undefined;
-        } catch (error) {
-            elizaLogger.error("Failed to get cache:", {
-                error: error instanceof Error ? error.message : String(error),
-                agentId: params.agentId,
-                key: params.key,
-            });
-            throw error;
-        }
+                return result[0]?.value || undefined;
+            } catch (error) {
+                elizaLogger.error("Error fetching cache", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    key: params.key,
+                    agentId: params.agentId,
+                });
+                return undefined;
+            }
+        }, "getCache");
     }
 
     async setCache(params: {
@@ -1575,52 +1555,58 @@ export class DrizzleDatabaseAdapter
         key: string;
         value: string;
     }): Promise<boolean> {
-        try {
-            await this.db
-                .insert(cacheTable)
-                .values({
+        return this.withDatabase(async () => {
+            try {
+                await this.db
+                    .insert(cacheTable)
+                    .values({
+                        key: params.key,
+                        agentId: params.agentId,
+                        value: sql`${params.value}::jsonb`,
+                    })
+                    .onConflictDoUpdate({
+                        target: [cacheTable.key, cacheTable.agentId],
+                        set: {
+                            value: params.value,
+                        },
+                    });
+                return true;
+            } catch (error) {
+                elizaLogger.error("Error setting cache", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
                     key: params.key,
                     agentId: params.agentId,
-                    value: sql`${params.value}::jsonb`,
-                })
-                .onConflictDoUpdate({
-                    target: [cacheTable.key, cacheTable.agentId],
-                    set: {
-                        value: params.value,
-                    },
                 });
-            return true;
-        } catch (error) {
-            elizaLogger.error("Error setting cache", {
-                error: error instanceof Error ? error.message : String(error),
-                key: params.key,
-                agentId: params.agentId,
-            });
-            return false;
-        }
+                return false;
+            }
+        }, "setCache");
     }
 
     async deleteCache(params: {
         agentId: UUID;
         key: string;
     }): Promise<boolean> {
-        try {
-            await this.db
-                .delete(cacheTable)
-                .where(
-                    and(
-                        eq(cacheTable.agentId, params.agentId),
-                        eq(cacheTable.key, params.key)
-                    )
-                );
-            return true;
-        } catch (error) {
-            elizaLogger.error("Error deleting cache", {
-                error: error instanceof Error ? error.message : String(error),
-                key: params.key,
-                agentId: params.agentId,
-            });
-            return false;
-        }
+        return this.withDatabase(async () => {
+            try {
+                await this.db
+                    .delete(cacheTable)
+                    .where(
+                        and(
+                            eq(cacheTable.agentId, params.agentId),
+                            eq(cacheTable.key, params.key)
+                        )
+                    );
+                return true;
+            } catch (error) {
+                elizaLogger.error("Error deleting cache", {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                    key: params.key,
+                    agentId: params.agentId,
+                });
+                return false;
+            }
+        }, "deleteCache");
     }
 }

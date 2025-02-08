@@ -5,13 +5,16 @@ import {
     jsonb,
     pgTable,
     text,
-    timestamp,
     uuid,
     vector,
 } from "drizzle-orm/pg-core";
 import { getEmbeddingConfig } from "@elizaos/core";
 import { sql } from "drizzle-orm";
 
+// Const.
+const DIMENSIONS = getEmbeddingConfig().dimensions;
+
+// Custom types.
 const stringJsonb = customType<{ data: string; driverData: string }>({
     dataType() {
         return "jsonb";
@@ -36,8 +39,7 @@ const numberTimestamp = customType<{ data: number; driverData: string }>({
     },
 });
 
-const DIMENSIONS = getEmbeddingConfig().dimensions;
-
+// Tables.
 export const accountTable = pgTable("accounts", {
     id: uuid("id").primaryKey().notNull(),
     createdAt: numberTimestamp("createdAt")
