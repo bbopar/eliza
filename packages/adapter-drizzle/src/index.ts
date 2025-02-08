@@ -39,16 +39,14 @@ import {
 import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
 import { v4 } from "uuid";
 import { runMigrations } from "./migrations";
-import pkg from "pg";
-import { Transaction } from "viem";
-import type { PgTransaction } from "drizzle-orm/pg-core";
-const { Pool } = pkg;
+import pg, { ConnectionConfig, PoolConfig } from "pg";
+type Pool = pg.Pool;
 
 export class DrizzleDatabaseAdapter
     extends DatabaseAdapter<NodePgDatabase>
     implements IDatabaseCacheAdapter
 {
-    private databaseUrl: string;
+    private pool: Pool;
     private databaseName: string;
     private readonly maxRetries: number = 3;
     private readonly baseDelay: number = 1000; // 1 second
@@ -57,7 +55,7 @@ export class DrizzleDatabaseAdapter
     private readonly connectionTimeout: number = 5000; // 5 seconds
 
     constructor(
-        databaseUrl: string,
+        connectionConfig: any,
         circuitBreakerConfig?: {
             failureThreshold?: number;
             resetTimeout?: number;
@@ -69,71 +67,70 @@ export class DrizzleDatabaseAdapter
             resetTimeout: circuitBreakerConfig?.resetTimeout ?? 60000,
             halfOpenMaxAttempts: circuitBreakerConfig?.halfOpenMaxAttempts ?? 3,
         });
-        this.databaseUrl = databaseUrl;
-        this.databaseName = this.setDatabaseName();
-        this.db = drizzle(databaseUrl);
+
+        const defaultConfig = {
+            max: 20,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: this.connectionTimeout,
+        };
+
+        const { poolConfig, databaseName } = this.parseConnectionConfig(
+            connectionConfig,
+            defaultConfig
+        );
+        this.databaseName = databaseName;
+        this.pool = new pg.Pool(poolConfig);
+
+        this.pool.on("error", (err) => {
+            elizaLogger.error("Unexpected pool error", err);
+            this.handlePoolError(err);
+        });
+
+        this.setupPoolErrorHandling();
+        this.db = drizzle({ client: this.pool });
     }
 
-    private setDatabaseName(): string {
-        const DATABASE_NAME_PATTERN = /\/([^\/\?]+)(?:\?|$)/;
-        const matches = this.databaseUrl.match(DATABASE_NAME_PATTERN);
-        return matches?.[1] || "postgres";
+    private setupPoolErrorHandling() {
+        process.on("SIGINT", async () => {
+            await this.cleanup();
+            process.exit(0);
+        });
+
+        process.on("SIGTERM", async () => {
+            await this.cleanup();
+            process.exit(0);
+        });
+
+        process.on("beforeExit", async () => {
+            await this.cleanup();
+        });
     }
 
-    private async setEmbeddingProviderSettings(): Promise<void> {
-        const embeddingConfig = getEmbeddingConfig();
-        const providers = ["openai", "ollama", "gaianet"] as const;
+    private async handlePoolError(error: Error) {
+        elizaLogger.error("Pool error occurred, attempting to reconnect", {
+            error: error.message,
+        });
 
         try {
-            await this.db.transaction(async (tx) => {
-                for (const provider of providers) {
-                    const query = sql.raw(
-                        `ALTER DATABASE "${this.databaseName}" SET app.use_${provider}_embedding = 'false'`
-                    );
-                    await tx.execute(query);
-                }
+            // Close existing pool
+            await this.pool.end();
 
-                if (
-                    Object.values(EmbeddingProvider).includes(
-                        embeddingConfig.provider
-                    )
-                ) {
-                    const providerName = embeddingConfig.provider.toLowerCase();
-                    const query = sql.raw(
-                        `ALTER DATABASE "${this.databaseName}" SET app.use_${providerName}_embedding = 'true'`
-                    );
-                    await tx.execute(query);
-                }
+            // Create new pool
+            this.pool = new pg.Pool({
+                ...this.pool.options,
+                connectionTimeoutMillis: this.connectionTimeout,
             });
-        } catch (error) {
-            elizaLogger.error(
-                "Failed to configure database embedding provider settings:",
-                {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            );
-            throw error;
-        }
-    }
 
-    private async validateVectorSetup(): Promise<boolean> {
-        try {
-            const vectorExt = await this.db.execute(sql`
-                SELECT * FROM pg_extension WHERE extname = 'vector'
-            `);
-
-            const hasVector = vectorExt?.rows.length > 0;
-
-            if (!hasVector) {
-                elizaLogger.warn("Vector extension not found");
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            elizaLogger.error("Error validating vector setup:", error);
-            return false;
+            await this.testConnection();
+            elizaLogger.success("Pool reconnection successful");
+        } catch (reconnectError) {
+            elizaLogger.error("Failed to reconnect pool", {
+                error:
+                    reconnectError instanceof Error
+                        ? reconnectError.message
+                        : String(reconnectError),
+            });
+            throw reconnectError;
         }
     }
 
@@ -196,6 +193,99 @@ export class DrizzleDatabaseAdapter
         throw lastError;
     }
 
+    async cleanup(): Promise<void> {
+        try {
+            await this.pool.end();
+            elizaLogger.info("Database pool closed");
+        } catch (error) {
+            elizaLogger.error("Error closing database pool:", error);
+        }
+    }
+
+    private parseConnectionConfig(
+        config: ConnectionConfig,
+        defaults: Partial<PoolConfig>
+    ): { poolConfig: PoolConfig; databaseName: string } {
+        if (typeof config === "string") {
+            try {
+                const url = new URL(config);
+                const databaseName = url.pathname.split("/")[1] || "postgres";
+                return {
+                    poolConfig: { ...defaults, connectionString: config },
+                    databaseName,
+                };
+            } catch (error) {
+                throw new Error(
+                    `Invalid connection string: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`
+                );
+            }
+        } else {
+            return {
+                poolConfig: { ...defaults, ...config },
+                databaseName: config.database || "postgres",
+            };
+        }
+    }
+
+    private async setEmbeddingProviderSettings(): Promise<void> {
+        const embeddingConfig = getEmbeddingConfig();
+        const providers = ["openai", "ollama", "gaianet"] as const;
+
+        try {
+            await this.db.transaction(async (tx) => {
+                for (const provider of providers) {
+                    const query = sql.raw(
+                        `ALTER DATABASE "${this.databaseName}" SET app.use_${provider}_embedding = 'false'`
+                    );
+                    await tx.execute(query);
+                }
+
+                if (
+                    Object.values(EmbeddingProvider).includes(
+                        embeddingConfig.provider
+                    )
+                ) {
+                    const providerName = embeddingConfig.provider.toLowerCase();
+                    const query = sql.raw(
+                        `ALTER DATABASE "${this.databaseName}" SET app.use_${providerName}_embedding = 'true'`
+                    );
+                    await tx.execute(query);
+                }
+            });
+        } catch (error) {
+            elizaLogger.error(
+                "Failed to configure database embedding provider settings:",
+                {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            );
+            throw error;
+        }
+    }
+
+    private async validateVectorSetup(): Promise<boolean> {
+        try {
+            const vectorExt = await this.db.execute(sql`
+                SELECT * FROM pg_extension WHERE extname = 'vector'
+            `);
+
+            const hasVector = vectorExt?.rows.length > 0;
+
+            if (!hasVector) {
+                elizaLogger.warn("Vector extension not found");
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            elizaLogger.error("Error validating vector setup:", error);
+            return false;
+        }
+    }
+
     async init(): Promise<void> {
         try {
             await this.setEmbeddingProviderSettings();
@@ -208,11 +298,7 @@ export class DrizzleDatabaseAdapter
             `);
 
             if (!rows[0].exists || !(await this.validateVectorSetup())) {
-                const pool = new Pool({
-                    connectionString: this.databaseUrl,
-                });
-                await runMigrations(pool);
-                await pool.end();
+                await runMigrations(this.pool);
             }
         } catch (error) {
             elizaLogger.error("Failed to initialize database:", error);
