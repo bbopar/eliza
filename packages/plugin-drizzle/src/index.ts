@@ -287,9 +287,7 @@ export class DrizzleDatabaseAdapter
 
     async close(): Promise<void> {
         try {
-            if (this.db && (this.db as any).client) {
-                await (this.db as any).client.close();
-            }
+            await this.pool.end();
         } catch (error) {
             logger.error("Failed to close database connection:", {
                 error: error instanceof Error ? error.message : String(error),
