@@ -7,6 +7,7 @@ import { TwitterInteractionClient } from "./interactions.ts";
 import { TwitterPostClient } from "./post.ts";
 import { TwitterSpaceClient } from "./spaces.ts";
 import type { ITwitterClient } from "./types.ts";
+import { TwitterTestSuite } from "./test-suite.ts";
 
 /**
  * A manager that orchestrates all specialized Twitter logic:
@@ -169,7 +170,8 @@ const twitterPlugin: Plugin = {
     name: "twitter",
     description: "Twitter client with per-server instance management",
     clients: [TwitterClientInterface],
-    actions: [reply]
+    actions: [reply],
+    tests: [new TwitterTestSuite()]
 };
 
 export default twitterPlugin;

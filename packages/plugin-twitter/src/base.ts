@@ -84,7 +84,6 @@ export class ClientBase extends EventEmitter {
   static _twitterClients: { [accountIdentifier: string]: Scraper } = {};
   twitterClient: Scraper;
   runtime: IAgentRuntime;
-  directions: string;
   lastCheckedTweetId: bigint | null = null;
   temperature = 0.5;
 
@@ -244,16 +243,6 @@ export class ClientBase extends EventEmitter {
       this.twitterClient = new Scraper();
       ClientBase._twitterClients[username] = this.twitterClient;
     }
-
-    this.directions =
-      "- " +
-      (this.runtime.character.style?.all
-        ? this.runtime.character.style?.all?.join("\n- ")
-        : "") +
-      "- " +
-      (this.runtime.character.style?.post
-        ? this.runtime.character.style?.post?.join()
-        : "");
   }
 
   async init() {

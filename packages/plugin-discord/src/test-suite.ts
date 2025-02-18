@@ -14,6 +14,7 @@ import {
   AudioPlayerStatus,
   VoiceConnectionStatus,
   entersState,
+  VoiceConnection,
 } from "@discordjs/voice";
 
 const TEST_IMAGE_URL =
@@ -31,6 +32,10 @@ export class DiscordTestSuite implements TestSuite {
         fn: this.testCreatingDiscordClient.bind(this),
       },
       {
+        name: "Slash Commands - Join Voice",
+        fn: this.testJoinVoiceSlashCommand.bind(this),
+      },
+      {
         name: "Voice Playback & TTS",
         fn: this.testTextToSpeechPlayback.bind(this),
       },
@@ -42,19 +47,11 @@ export class DiscordTestSuite implements TestSuite {
         name: "Handle Incoming Messages",
         fn: this.testHandlingMessage.bind(this),
       },
+      {
+        name: "Slash Commands - Leave Voice",
+        fn: this.testLeaveVoiceSlashCommand.bind(this),
+      },
     ];
-  }
-
-  validateChannelId(runtime: IAgentRuntime) {
-    const testChannelId =
-      runtime.getSetting("DISCORD_TEST_CHANNEL_ID") ||
-      process.env.DISCORD_TEST_CHANNEL_ID;
-    if (!testChannelId) {
-      throw new Error(
-        "DISCORD_TEST_CHANNEL_ID is not set. Please provide a valid channel ID in the environment variables."
-      );
-    }
-    return testChannelId;
   }
 
   async testCreatingDiscordClient(runtime: IAgentRuntime) {
@@ -76,14 +73,67 @@ export class DiscordTestSuite implements TestSuite {
     }
   }
 
+  async testJoinVoiceSlashCommand(runtime: IAgentRuntime) {
+    try {
+      await this.waitForVoiceManagerReady(this.discordClient);
+  
+      const channel = await this.getTestChannel(runtime);
+      if (!channel || !channel.isTextBased()) {
+        throw new Error("Invalid test channel for slash command test.");
+      }
+  
+      // Simulate a join channel slash command interaction
+      const fakeJoinInteraction = {
+        isCommand: () => true,
+        commandName: "joinchannel",
+        options: {
+          get: (name: string) => (name === "channel" ? { value: channel.id } : null),
+        },
+        guild: (channel as TextChannel).guild,
+        deferReply: async () => {},
+        editReply: async (message: string) => {
+          logger.info(`JoinChannel Slash Command Response: ${message}`);
+        },
+      };
+  
+      await this.discordClient.voiceManager.handleJoinChannelCommand(fakeJoinInteraction as any);
+
+      logger.success("Slash command test completed successfully.");
+    } catch (error) {
+      throw new Error(`Error in slash commands test: ${error}`);
+    }
+  }
+
+  async testLeaveVoiceSlashCommand(runtime: IAgentRuntime) {
+    try {
+      await this.waitForVoiceManagerReady(this.discordClient);
+  
+      const channel = await this.getTestChannel(runtime);
+      if (!channel || !channel.isTextBased()) {
+        throw new Error("Invalid test channel for slash command test.");
+      }
+  
+      // Simulate a leave channel slash command interaction
+      const fakeLeaveInteraction = {
+        isCommand: () => true,
+        commandName: "leavechannel",
+        guildId: (channel as TextChannel).guildId,
+        reply: async (message: string) => {
+          logger.info(`LeaveChannel Slash Command Response: ${message}`);
+        },
+      };
+  
+      await this.discordClient.voiceManager.handleLeaveChannelCommand(fakeLeaveInteraction as any);
+
+      logger.success("Slash command test completed successfully.");
+    } catch (error) {
+      throw new Error(`Error in slash commands test: ${error}`);
+    }
+  }
+
   async testTextToSpeechPlayback(runtime: IAgentRuntime) {
     try {
-      if (!this.discordClient.voiceManager.isReady()) {
-        await new Promise<void>((resolve, reject) => {
-          this.discordClient.voiceManager.once("ready", resolve);
-          this.discordClient.voiceManager.once("error", reject);
-        });
-      }
+      await this.waitForVoiceManagerReady(this.discordClient);
 
       const channel = await this.getTestChannel(runtime);
       if (!channel || channel.type !== ChannelType.GuildVoice) {
@@ -92,17 +142,8 @@ export class DiscordTestSuite implements TestSuite {
 
       await this.discordClient.voiceManager.joinChannel(channel);
 
-      const guilds = await this.discordClient.client.guilds.fetch();
-      const fullGuilds = await Promise.all(
-        guilds.map((guild) => guild.fetch())
-      ); // Fetch full guild data
-
-      const activeGuild = fullGuilds.find((g) => g.members.me?.voice.channelId);
-      if (!activeGuild) {
-        throw new Error("No active voice connection found for the bot.");
-      }
-
-      const guildId = activeGuild.id;
+      const guild = await this.getActiveGuild(this.discordClient);
+      const guildId = guild.id;
       const connection =
         this.discordClient.voiceManager.getVoiceConnection(guildId);
 
@@ -128,30 +169,8 @@ export class DiscordTestSuite implements TestSuite {
         throw new Error("TTS response stream is null or undefined.");
       }
 
-      const audioPlayer = createAudioPlayer({
-        behaviors: {
-          noSubscriber: NoSubscriberBehavior.Pause,
-        },
-      });
-
-      const audioResource = createAudioResource(responseStream);
-
-      audioPlayer.play(audioResource);
-      connection.subscribe(audioPlayer);
-
-      logger.success("TTS playback started successfully.");
-
-      await new Promise<void>((resolve, reject) => {
-        audioPlayer.once(AudioPlayerStatus.Idle, () => {
-          logger.info("TTS playback finished.");
-          resolve();
-        });
-
-        audioPlayer.once("error", (error) => {
-          reject(error);
-          throw new Error(`TTS playback error: ${error}`);
-        });
-      });
+      await this.playAudioStream(responseStream, connection);
+      
     } catch (error) {
       throw new Error(`Error in TTS playback test: ${error}`);
     }
@@ -195,6 +214,10 @@ export class DiscordTestSuite implements TestSuite {
     }
   }
 
+  // #############################
+  //     Utility Functions      
+  // #############################
+  
   async getTestChannel(runtime: IAgentRuntime) {
     const channelId = this.validateChannelId(runtime);
     const channel = await this.discordClient.client.channels.fetch(
@@ -227,5 +250,70 @@ export class DiscordTestSuite implements TestSuite {
     } catch (error) {
       throw new Error(`Error sending message: ${error}`);
     }
+  }
+
+  async playAudioStream(responseStream: any, connection: VoiceConnection) {
+    const audioPlayer = createAudioPlayer({
+      behaviors: {
+        noSubscriber: NoSubscriberBehavior.Pause,
+      },
+    });
+
+    const audioResource = createAudioResource(responseStream);
+
+    audioPlayer.play(audioResource);
+    connection.subscribe(audioPlayer);
+
+    logger.success("TTS playback started successfully.");
+
+    await new Promise<void>((resolve, reject) => {
+      audioPlayer.once(AudioPlayerStatus.Idle, () => {
+        logger.info("TTS playback finished.");
+        resolve();
+      });
+
+      audioPlayer.once("error", (error) => {
+        reject(error);
+        throw new Error(`TTS playback error: ${error}`);
+      });
+    });
+  }
+
+  async getActiveGuild(discordClient: DiscordClient) {
+    const guilds = await discordClient.client.guilds.fetch();
+      const fullGuilds = await Promise.all(
+        guilds.map((guild) => guild.fetch())
+      ); // Fetch full guild data
+
+      const activeGuild = fullGuilds.find((g) => g.members.me?.voice.channelId);
+      if (!activeGuild) {
+        throw new Error("No active voice connection found for the bot.");
+      }
+      return activeGuild;
+  }
+
+  private async waitForVoiceManagerReady(discordClient: DiscordClient) {
+    if (!discordClient) {
+      throw new Error("Discord client is not initialized.");
+    }
+  
+    if (!discordClient.voiceManager.isReady()) {
+      await new Promise<void>((resolve, reject) => {
+        discordClient.voiceManager.once("ready", resolve);
+        discordClient.voiceManager.once("error", reject);
+      });
+    }
+  }
+
+  private validateChannelId(runtime: IAgentRuntime) {
+    const testChannelId =
+      runtime.getSetting("DISCORD_TEST_CHANNEL_ID") ||
+      process.env.DISCORD_TEST_CHANNEL_ID;
+    if (!testChannelId) {
+      throw new Error(
+        "DISCORD_TEST_CHANNEL_ID is not set. Please provide a valid channel ID in the environment variables."
+      );
+    }
+    return testChannelId;
   }
 }
